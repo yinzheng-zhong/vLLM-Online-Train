@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vllm-online-train"
+version = "0.4.1"
+description = "Train a speculative draft head from live traffic on a serving vLLM engine"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["safetensors"]
+
+# The whole foothold: `load_general_plugins()` runs this inside the worker
+# process, which is the one that owns the model, the target LM head and the GPU.
+[project.entry-points."vllm.general_plugins"]
+online_train = "vllm_online_train:register"
+
+[project.scripts]
+online-train-init-head = "vllm_online_train.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vllm_online_train*"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "SIM", "UP", "RUF", "PIE", "TRY"]
+ignore = [
+    "SIM103",  # explicit early returns read better where each has its own reason
+    "TRY003",  # long messages in raises are deliberate here
+    "TRY300",
+    "RUF012",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["vllm_online_train", "tests"]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# B017: broad `raises` is the point when asserting pydantic rejects a bad config.
+# C408: `dict(...)` then `.update(overrides)` is the deliberate fixture pattern.
+"tests/*" = ["B017", "C408"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: needs a locally cached target config and builds a real draft module"]

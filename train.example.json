@@ -1,0 +1,30 @@
+{
+  "_comment": "3-layer DFlash head on Qwen3-4B, 24 GiB card. Serve with --gpu-memory-utilization 0.62.",
+
+  "kl_chunk_size": 128,
+  "sequences_per_step": 2,
+  "anchors_per_sequence": 8,
+  "grad_accum_steps": 4,
+
+  "learning_rate": 6e-4,
+  "warmup_ratio": 0.05,
+  "total_steps": null,
+
+  "buffer_capacity_tokens": 60000,
+  "max_rollout_tokens": 2048,
+  "min_rollout_tokens": 64,
+  "skip_prefix_cache_hits": true,
+
+  "train_device": null,
+
+  "idle_ms": 50.0,
+  "poll_ms": 10.0,
+  "busy_tokens": 0,
+  "max_micro_steps_per_gate": 0,
+
+  "metrics_path": "./online-train.jsonl",
+  "log_every": 5,
+  "checkpoint_dir": "./heads/qwen3-4b-3l-v1",
+  "checkpoint_every": 200,
+  "publish_mode": "off"
+}

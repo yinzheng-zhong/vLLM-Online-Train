@@ -1,0 +1,6 @@
+heads/
+*.jsonl
+__pycache__/
+*.egg-info/
+.pytest_cache/
+CLAUDE.local.md

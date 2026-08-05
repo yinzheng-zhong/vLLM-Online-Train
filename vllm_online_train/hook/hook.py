@@ -1,0 +1,154 @@
+import json
+from typing import Any
+
+from vllm.logger import init_logger
+
+from vllm_online_train.config.settings import OnlineTrainSettings
+from vllm_online_train.hook.loader import SettingsLoader
+from vllm_online_train.hook.patcher import MethodPatcher
+from vllm_online_train.hook.state import CaptureState
+from vllm_online_train.step import EngineStep
+
+logger = init_logger(__name__)
+
+
+class CaptureHook:
+    """Tees one engine step's training features out of the model runner.
+
+    The wrapped method receives everything the objective needs in a single call, once
+    per engine step, at a point where the step's sampling has resolved but the next
+    step has not begun. Any exception disables capture for the rest of the process
+    rather than reaching the serving path.
+    """
+
+    def __init__(
+        self,
+        patcher: MethodPatcher,
+        loader: SettingsLoader,
+        state: CaptureState,
+    ) -> None:
+        """
+        Args:
+            patcher: Wraps and unwraps the runner method.
+            loader: Reads the operator's settings.
+            state: Holds the session and the disabled flag.
+        """
+        self.patcher = patcher
+        self.loader = loader
+        self.state = state
+
+    @property
+    def installed(self) -> bool:
+        """Whether the runner method is currently wrapped."""
+        return self.patcher.installed
+
+    def install(self) -> bool:
+        """Wrap the runner method. Idempotent.
+
+        Returns:
+            Whether the method is now wrapped.
+
+        Raises:
+            RuntimeError: If the method's signature does not match the pin.
+        """
+        return self.patcher.install(self.observe)
+
+    def uninstall(self) -> None:
+        """Restore the original method and reset the capture state."""
+        self.patcher.uninstall()
+        self.state.reset()
+
+    def observe(
+        self,
+        runner: Any,
+        scheduler_output: Any,
+        sampled_token_ids: Any,
+        hidden_states: Any,
+        aux_hidden_states: Any,
+        spec_decode_metadata: Any,
+    ) -> None:
+        """Tee one step. Swallows everything; never raises into the serving path.
+
+        Args:
+            runner: The `GPUModelRunner` the wrapped method was called on.
+            scheduler_output: This step's schedule.
+            sampled_token_ids: `[num_reqs, num_spec_tokens + 1]`, `-1` where rejected.
+            hidden_states: `[>=T, hidden_size]` post-norm final activations.
+            aux_hidden_states: Per-feature-layer activations, or `None`.
+            spec_decode_metadata: Per-request draft counts, or `None`.
+        """
+        if self.state.disabled:
+            return
+        try:
+            if self.state.session is None and not self._build(runner):
+                return
+
+            session = self.state.session
+            session.note_step(scheduler_output.total_num_scheduled_tokens)
+
+            input_ids = getattr(runner, "input_ids", None)
+            if input_ids is None or aux_hidden_states is None:
+                return
+            session.observe(
+                EngineStep(
+                    scheduler_output=scheduler_output,
+                    input_batch=runner.input_batch,
+                    input_ids=input_ids.gpu,
+                    aux_hidden_states=aux_hidden_states,
+                    hidden_states=hidden_states,
+                    sampled_token_ids=sampled_token_ids,
+                    spec_decode_metadata=spec_decode_metadata,
+                )
+            )
+        except Exception as exc:
+            self.state.disable(
+                f"capture raised {type(exc).__name__}: {exc}", exc_info=True
+            )
+
+    def _build(self, runner: Any) -> bool:
+        """Assemble the session on the first usable step.
+
+        Deferred here because `register()` receives no arguments: the `VllmConfig` is
+        only reachable as `runner.vllm_config`.
+
+        Args:
+            runner: The `GPUModelRunner` the wrapped method was called on.
+
+        Returns:
+            Whether a session is now active. Capture is disabled either way when the
+            answer is no, so a declined build costs one attribute check per step
+            rather than a rebuild attempt.
+        """
+        settings = self._read_settings()
+        if settings is None:
+            return False
+
+        from vllm_online_train.assembler import SessionAssembler
+
+        session = SessionAssembler().build(runner, settings)
+        if session is None:
+            self.state.disable("the assembler declined to build a session")
+            return False
+        self.state.activate(session)
+        return True
+
+    def _read_settings(self) -> OnlineTrainSettings | None:
+        """Read and validate the operator's settings.
+
+        Returns:
+            The settings, or `None` after disabling capture with a reason.
+        """
+        env = self.loader.CONFIG_ENV
+        try:
+            settings = self.loader.load()
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            self.state.disable(f"could not read ${env}: {exc}")
+            return None
+
+        if settings is None:
+            self.state.disable(f"${env} is unset")
+            return None
+        if not settings.enabled:
+            self.state.disable("config sets enabled=false")
+            return None
+        return settings
