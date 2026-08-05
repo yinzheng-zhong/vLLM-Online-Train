@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from vllm.logger import init_logger
+
 from vllm_online_train.capture.buffer import RolloutBuffer
 from vllm_online_train.capture.positions import ValidPositions
 from vllm_online_train.capture.sampler import RequestSampler
@@ -10,15 +12,10 @@ from vllm_online_train.step import EngineStep
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
 
+logger = init_logger(__name__)
+
 
 class RolloutCapture:
-    """Tees target activations from the engine step into a `RolloutBuffer`.
-
-    The staging protocol -- drain, reserve, commit -- runs entirely on the engine thread
-    inside `observe`, in that order and without interleaving. The trainer thread reaches
-    this object only through `as_metrics`.
-    """
-
     def __init__(
         self,
         settings: CaptureSettings,
@@ -27,7 +24,12 @@ class RolloutCapture:
         sampler: RequestSampler,
         positions: ValidPositions,
     ) -> None:
-        """
+        """Tees target activations from the engine step into a `RolloutBuffer`.
+
+        The staging protocol -- drain, reserve, commit -- runs entirely on the engine
+        thread inside `observe`, in that order and without interleaving. The trainer
+        thread reaches this object only through `as_metrics`.
+
         Args:
             settings: Which requests are eligible.
             buffer: Receives the drained chunks.
@@ -131,10 +133,16 @@ class RolloutCapture:
 
             if not self.sampler.accepts(req_id):
                 self.skipped_sample_rate += 1
+                logger.debug("request %s skipped: below capture sample rate", req_id)
                 continue
 
             if self.settings.skip_prefix_cache_hits and new_req.num_computed_tokens > 0:
                 self.buffer.drop(req_id, reason="prefix_cache_hit")
+                logger.debug(
+                    "request %s dropped: prefix cache hit (%d computed tokens)",
+                    req_id,
+                    new_req.num_computed_tokens,
+                )
                 continue
 
             prompt_ids = new_req.prompt_token_ids

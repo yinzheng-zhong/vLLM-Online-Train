@@ -8,10 +8,9 @@ from vllm_online_train.head.layers.norm import RMSNorm
 
 
 class DFlashLayer(nn.Module):
-    """One pre-norm decoder layer: cross attention over the context, then an MLP."""
-
     def __init__(self, arch: DFlashHeadArch) -> None:
-        """
+        """One pre-norm decoder layer: cross attention over the context, then an MLP.
+
         Args:
             arch: Supplies every width the sublayers need.
         """

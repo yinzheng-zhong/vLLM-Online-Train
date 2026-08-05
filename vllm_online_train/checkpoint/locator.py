@@ -1,5 +1,9 @@
 from typing import Any
 
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
+
 
 class DrafterLocator:
     """Finds the live draft module on a model runner."""
@@ -17,5 +21,6 @@ class DrafterLocator:
         drafter = getattr(runner, "drafter", None)
         model = getattr(drafter, "model", None)
         if model is None or not hasattr(model, "load_weights"):
+            logger.debug("No loadable drafter model found on runner %r", runner)
             return None
         return model

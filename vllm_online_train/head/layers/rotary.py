@@ -1,16 +1,17 @@
 import torch
 from torch import nn
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class RotaryEmbedding(nn.Module):
-    """Neox-style RoPE evaluated at explicit positions.
-
-    Positions are explicit because a replayed block sits at absolute positions
-    `a_m .. a_m + K - 1` while occupying contiguous slots in the packed sequence.
-    """
-
     def __init__(self, head_dim: int, base: float) -> None:
-        """
+        """Neox-style RoPE evaluated at explicit positions.
+
+        Positions are explicit because a replayed block sits at absolute positions
+        `a_m .. a_m + K - 1` while occupying contiguous slots in the packed sequence.
+
         Args:
             head_dim: Width of one attention head.
             base: RoPE theta.
@@ -20,6 +21,12 @@ class RotaryEmbedding(nn.Module):
             base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
         )
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+        logger.debug(
+            "built RoPE inv_freq buffer: head_dim=%d, base=%.1f, size=%d",
+            head_dim,
+            base,
+            inv_freq.numel(),
+        )
 
     def forward(self, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Build the cosine and sine tables for a set of positions.

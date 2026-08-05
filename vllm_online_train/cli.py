@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.checkpoint.config import DraftConfigBuilder
 from vllm_online_train.checkpoint.layers import TargetLayerPlanner
@@ -25,6 +26,8 @@ from vllm_online_train.head.arch import ArchFactory
 from vllm_online_train.head.factory import HeadFactory
 from vllm_online_train.head.masks import BlockMaskBuilder
 from vllm_online_train.head.weights import HeadWeights
+
+logger = init_logger(__name__)
 
 DTYPES = {
     "bfloat16": torch.bfloat16,
@@ -148,6 +151,12 @@ def main(argv: list[str] | None = None) -> int:
         plan = planner.plan(to_request(args))
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+    logger.debug(
+        "resolved plan: %d draft layers, target_layer_ids=%s of %d target layers",
+        plan.arch.num_layers,
+        plan.target_layer_ids,
+        plan.num_target_layers,
+    )
 
     target = plan.target_config
     config = DraftConfigBuilder().build(
@@ -165,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     generator = torch.Generator().manual_seed(args.seed)
     head = factory.create(plan.arch, generator=generator)
 
+    logger.debug("writing checkpoint to %s at dtype=%s", out, args.dtype)
     writer.write(
         out,
         weights.export(head),

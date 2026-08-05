@@ -25,6 +25,7 @@ class CaptureState:
             session: The assembled training subsystem.
         """
         self.session = session
+        logger.debug("Online training capture state activated")
 
     def disable(self, reason: str, *, exc_info: bool = False) -> None:
         """Stop capturing for the rest of the process. Idempotent.
@@ -54,3 +55,4 @@ class CaptureState:
         self.shutdown()
         self.disabled = False
         self.reason = None
+        logger.debug("Online training capture state reset")

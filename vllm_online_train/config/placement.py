@@ -1,4 +1,7 @@
 import torch
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class DevicePlacement:
@@ -24,12 +27,24 @@ class DevicePlacement:
                 process cannot see.
         """
         if requested is None:
+            logger.debug(
+                "No train_device set; training on engine device %s", engine_device
+            )
             return engine_device
 
         device = self._parse(requested)
         if device.index is None:
-            return engine_device if device.type == engine_device.type else device
+            resolved = engine_device if device.type == engine_device.type else device
+            logger.debug(
+                "train_device=%r carries no index; resolved to %s",
+                requested,
+                resolved,
+            )
+            return resolved
         self._check_visible(device)
+        logger.debug(
+            "train_device=%r resolved to explicit device %s", requested, device
+        )
         return device
 
     @staticmethod

@@ -1,8 +1,12 @@
 from dataclasses import dataclass
 from typing import Any
 
+from vllm.logger import init_logger
+
 from vllm_online_train.checkpoint.layers import TargetLayerPlanner
 from vllm_online_train.head.arch import ArchFactory, DFlashHeadArch
+
+logger = init_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -44,10 +48,9 @@ class InitHeadPlan:
 
 
 class InitHeadPlanner:
-    """Resolves a fresh head's shape from a target config plus overrides."""
-
     def __init__(self, planner: TargetLayerPlanner, arch_factory: ArchFactory) -> None:
-        """
+        """Resolves a fresh head's shape from a target config plus overrides.
+
         Args:
             planner: Places the feature layers when none are given.
             arch_factory: Supplies the RoPE base fallback.
@@ -106,6 +109,14 @@ class InitHeadPlanner:
                 request.rope_theta or self.arch_factory.rope_theta(target)
             ),
             attention_bias=bool(getattr(target, "attention_bias", False)),
+        )
+        logger.debug(
+            "Resolved head plan: hidden_size=%d, num_heads=%d, "
+            "target_layer_ids=%s, mask_token_id=%d",
+            hidden_size,
+            num_heads,
+            target_layer_ids,
+            mask_token_id,
         )
         return InitHeadPlan(
             arch=arch,

@@ -12,14 +12,6 @@ logger = init_logger(__name__)
 
 
 class WeightPublisher:
-    """Loads a trained head into the live drafter, preserving buffer addresses.
-
-    `DFlashQwen3Model._build_context_kv_buffers` keeps derived tensors beside the
-    parameters. `load_weights` rebuilds them, but `torch.cat` allocates at a new
-    address and anything holding the old pointer keeps reading the replaced tensor.
-    This copies the new values back into the original storages and rebinds them.
-    """
-
     DERIVED_BUFFERS = (
         "_hidden_norm_weight",
         "_fused_kv_weight",
@@ -29,7 +21,13 @@ class WeightPublisher:
     """Tensors `_build_context_kv_buffers` reassigns rather than writes in place."""
 
     def __init__(self, naming: WeightNameRewriter, weights: HeadWeights) -> None:
-        """
+        """Loads a trained head into the live drafter, preserving buffer addresses.
+
+        `DFlashQwen3Model._build_context_kv_buffers` keeps derived tensors beside the
+        parameters. `load_weights` rebuilds them, but `torch.cat` allocates at a new
+        address and anything holding the old pointer keeps reading the replaced tensor.
+        This copies the new values back into the original storages and rebinds them.
+
         Args:
             naming: Un-fuses the head's parameters into on-disk naming.
             weights: Exports the head's parameter tree.

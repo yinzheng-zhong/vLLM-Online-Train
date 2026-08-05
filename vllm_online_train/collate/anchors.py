@@ -1,20 +1,29 @@
 import random
 
+from vllm.logger import init_logger
+
 from vllm_online_train.collate.batch import BlockRecord
 from vllm_online_train.config.settings import AnchorSettings
 
+logger = init_logger(__name__)
+
 
 class AnchorSampler:
-    """Cuts a rollout's candidate blocks down to the per-sequence anchor cap."""
-
     def __init__(self, settings: AnchorSettings, rng: random.Random) -> None:
-        """
+        """Cuts a rollout's candidate blocks down to the per-sequence anchor cap.
+
         Args:
             settings: Anchor cap, stride and subsample mode.
             rng: Draws the subsample.
         """
         self.settings = settings
         self.rng = rng
+        logger.debug(
+            "anchor sampler: cap=%d stride=%d random_subsample=%s",
+            settings.anchors_per_sequence,
+            settings.anchor_stride,
+            settings.random_anchor_subsample,
+        )
 
     @property
     def stride(self) -> int:

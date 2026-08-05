@@ -5,10 +5,9 @@ from vllm_online_train.contracts.positions import BlockPositions
 
 
 class TeacherScorer:
-    """Gathers the target activations that score each label."""
-
     def __init__(self, positions: BlockPositions) -> None:
-        """
+        """Gathers the target activations that score each label.
+
         Args:
             positions: Maps anchors to the positions their block slots occupy.
         """

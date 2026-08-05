@@ -1,6 +1,7 @@
 import time
 
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.capture.buffer import RolloutBuffer
 from vllm_online_train.collate.batch import ReplayBatch
@@ -11,9 +12,12 @@ from vllm_online_train.head.weights import HeadWeights
 from vllm_online_train.train.loss.sft import SFTObjective
 from vllm_online_train.train.optim.schedule import ScheduleFactory
 
+logger = init_logger(__name__)
+
 
 class OnlineTrainer:
-    """Trains a `TrainableDFlashHead` on batches drawn from a `RolloutBuffer`."""
+    DEBUG_LOG_EVERY_STEPS: int = 50
+    """Optimizer steps between debug-level grad_norm/lr log lines."""
 
     def __init__(
         self,
@@ -26,7 +30,8 @@ class OnlineTrainer:
         optimizer: torch.optim.Optimizer,
         sequences_per_step: int,
     ) -> None:
-        """
+        """Trains a `TrainableDFlashHead` on batches drawn from a `RolloutBuffer`.
+
         Args:
             settings: Clipping, accumulation and the schedule shape.
             head: The head being trained.
@@ -52,6 +57,12 @@ class OnlineTrainer:
         self.step_count = 0
         self.micro_step_count = 0
         self.last_metrics: dict[str, float] = {}
+        logger.debug(
+            "OnlineTrainer: sequences_per_step=%d, grad_accum_steps=%d, grad_clip=%.3g",
+            sequences_per_step,
+            settings.grad_accum_steps,
+            settings.grad_clip,
+        )
 
     def step(self, batch: ReplayBatch) -> dict[str, float]:
         """Run one micro-batch, stepping the optimizer once per accumulation cycle.
@@ -82,6 +93,13 @@ class OnlineTrainer:
             self.step_count += 1
             metrics["grad_norm"] = float(grad_norm)
             metrics["stepped"] = 1.0
+            if self.step_count % self.DEBUG_LOG_EVERY_STEPS == 0:
+                logger.debug(
+                    "OnlineTrainer step %d: grad_norm=%.4f, lr=%.6g",
+                    self.step_count,
+                    float(grad_norm),
+                    self.optimizer.param_groups[0]["lr"],
+                )
         else:
             metrics["stepped"] = 0.0
 
@@ -140,3 +158,8 @@ class OnlineTrainer:
         self.step_count = int(state.get("step_count", 0))
         self.micro_step_count = int(state.get("micro_step_count", 0))
         self.weights.freeze_shared(self.head)
+        logger.debug(
+            "OnlineTrainer resumed at step_count=%d, micro_step_count=%d",
+            self.step_count,
+            self.micro_step_count,
+        )

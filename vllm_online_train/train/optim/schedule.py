@@ -1,8 +1,12 @@
 from collections.abc import Callable
 
+from vllm.logger import init_logger
+
 from vllm_online_train.config.settings import OptimSettings
 from vllm_online_train.train.optim.cosine import CosineWithWarmup
 from vllm_online_train.train.optim.flat import WarmupOnly
+
+logger = init_logger(__name__)
 
 
 class ScheduleFactory:
@@ -21,7 +25,12 @@ class ScheduleFactory:
             `CosineWithWarmup` when a horizon is set, else `WarmupOnly`.
         """
         if settings.total_steps:
+            logger.debug(
+                "ScheduleFactory: selected CosineWithWarmup for total_steps=%d",
+                settings.total_steps,
+            )
             return CosineWithWarmup(settings.total_steps, settings.warmup_ratio)
+        logger.debug("ScheduleFactory: no total_steps set, selected WarmupOnly")
         return WarmupOnly(self.warmup_steps(settings))
 
     @classmethod

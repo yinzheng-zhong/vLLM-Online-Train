@@ -8,15 +8,13 @@ from vllm_online_train.head.model import DFlashModel
 
 
 class TrainableDFlashHead(nn.Module):
-    """Eager DFlash head with a training-shaped forward.
-
-    The parameter tree mirrors the serving module name for name and shape for shape.
-    The borrowed embedding table and LM head are held as frozen parameters; loading,
-    casting and exporting them is `HeadWeights`' job.
-    """
-
     def __init__(self, arch: DFlashHeadArch, masks: BlockMaskBuilder) -> None:
-        """
+        """Eager DFlash head with a training-shaped forward.
+
+        The parameter tree mirrors the serving module name for name and shape for shape.
+        The borrowed embedding table and LM head are held as frozen parameters; loading,
+        casting and exporting them is `HeadWeights`' job.
+
         Args:
             arch: Shape of the head.
             masks: Builds the anchored block mask and its position ids.

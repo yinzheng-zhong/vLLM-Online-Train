@@ -8,14 +8,12 @@ from vllm_online_train.head.layers.rotary import RotaryEmbedding
 
 
 class DFlashAttention(nn.Module):
-    """Grouped-query cross attention with Qwen3 per-head Q/K norm.
-
-    Uses fused `qkv_proj` and `o_proj` rather than split projections, so the parameter
-    names match the serving module.
-    """
-
     def __init__(self, arch: DFlashHeadArch) -> None:
-        """
+        """Grouped-query cross attention with Qwen3 per-head Q/K norm.
+
+        Uses fused `qkv_proj` and `o_proj` rather than split projections, so the
+        parameter names match the serving module.
+
         Args:
             arch: Supplies head counts, widths, bias and the RoPE base.
         """

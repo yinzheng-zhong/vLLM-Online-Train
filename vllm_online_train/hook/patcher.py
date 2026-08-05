@@ -10,14 +10,12 @@ logger = init_logger(__name__)
 
 
 class MethodPatcher:
-    """Owns the wrapping and unwrapping of `propose_draft_token_ids`.
-
-    Idempotent and reversible: `register()` runs in several vLLM processes, and
-    patching a class in one that never builds a runner is inert.
-    """
-
     def __init__(self, guard: SignatureGuard) -> None:
-        """
+        """Owns the wrapping and unwrapping of `propose_draft_token_ids`.
+
+        Idempotent and reversible: `register()` runs in several vLLM processes, and
+        patching a class in one that never builds a runner is inert.
+
         Args:
             guard: Checks the method's signature against the pin before wrapping.
         """
@@ -80,6 +78,7 @@ class MethodPatcher:
             GPUModelRunner.propose_draft_token_ids = self._original
             self._original = None
             self._installed = False
+            logger.debug("Online training capture hook uninstalled")
 
     @staticmethod
     def _wrap(original: Any, observe: Callable[..., None]) -> Any:

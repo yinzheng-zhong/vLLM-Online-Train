@@ -1,4 +1,5 @@
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.capture.records import RolloutRecord
 from vllm_online_train.collate.anchors import AnchorSampler
@@ -7,10 +8,10 @@ from vllm_online_train.collate.blocks import BlockBuilder
 from vllm_online_train.collate.transfer import DeviceTransfer
 from vllm_online_train.config.shapes import EngineShapes
 
+logger = init_logger(__name__)
+
 
 class RolloutCollator:
-    """Pads captured rollouts into one `ReplayBatch`."""
-
     def __init__(
         self,
         blocks: BlockBuilder,
@@ -19,7 +20,8 @@ class RolloutCollator:
         shapes: EngineShapes,
         pad_token_id: int = 0,
     ) -> None:
-        """
+        """Pads captured rollouts into one `ReplayBatch`.
+
         Args:
             blocks: Enumerates candidate anchors per rollout.
             anchors: Cuts them to the per-sequence cap.
@@ -32,6 +34,11 @@ class RolloutCollator:
         self.transfer = transfer
         self.shapes = shapes
         self.pad_token_id = pad_token_id
+        logger.debug(
+            "rollout collator built: num_draft_tokens=%d pad_token_id=%d",
+            shapes.num_draft_tokens,
+            pad_token_id,
+        )
 
     def collate(self, records: list[RolloutRecord]) -> ReplayBatch | None:
         """Build one padded batch.
@@ -56,6 +63,12 @@ class RolloutCollator:
 
         context = self._pad_context(usable, context_len)
         blocks = self._pad_blocks(usable, max_blocks, num_draft_tokens)
+        logger.debug(
+            "collated batch: rollouts=%d context_len=%d max_blocks=%d",
+            len(usable),
+            context_len,
+            max_blocks,
+        )
 
         send = self.transfer.send
         return ReplayBatch(

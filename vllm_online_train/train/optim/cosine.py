@@ -1,11 +1,14 @@
 import math
 
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
+
 
 class CosineWithWarmup:
-    """Learning-rate multiplier: linear warmup, then cosine decay to zero."""
-
     def __init__(self, total_steps: int, warmup_ratio: float) -> None:
-        """
+        """Learning-rate multiplier: linear warmup, then cosine decay to zero.
+
         Args:
             total_steps: The horizon the cosine decays towards.
             warmup_ratio: Fraction of `total_steps` spent warming up.
@@ -13,6 +16,11 @@ class CosineWithWarmup:
         self.total_steps = total_steps
         self.warmup_ratio = warmup_ratio
         self.warmup_steps = max(1, round(total_steps * warmup_ratio))
+        logger.debug(
+            "CosineWithWarmup: total_steps=%d, warmup_steps=%d",
+            total_steps,
+            self.warmup_steps,
+        )
 
     def __call__(self, step: int) -> float:
         """Compute the multiplier for one step.

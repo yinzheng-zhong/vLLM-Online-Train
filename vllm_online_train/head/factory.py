@@ -1,16 +1,18 @@
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.head.arch import DFlashHeadArch
 from vllm_online_train.head.head import TrainableDFlashHead
 from vllm_online_train.head.masks import BlockMaskBuilder
 from vllm_online_train.head.weights import HeadWeights
 
+logger = init_logger(__name__)
+
 
 class HeadFactory:
-    """Builds a `TrainableDFlashHead` that is initialised and correctly frozen."""
-
     def __init__(self, masks: BlockMaskBuilder, weights: HeadWeights) -> None:
-        """
+        """Builds a `TrainableDFlashHead` that is initialised and correctly frozen.
+
         Args:
             masks: Injected into every head this factory builds.
             weights: Performs the initialisation and the freeze.
@@ -35,4 +37,12 @@ class HeadFactory:
         """
         head = TrainableDFlashHead(arch, self.masks)
         self.weights.init_draft(head, generator=generator)
+        logger.debug(
+            "Built head: num_layers=%d hidden_size=%d block_size=%d "
+            "draft_vocab_size=%d",
+            arch.num_layers,
+            arch.hidden_size,
+            arch.block_size,
+            arch.draft_vocab_size,
+        )
         return head

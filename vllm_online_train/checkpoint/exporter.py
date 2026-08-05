@@ -12,16 +12,14 @@ logger = init_logger(__name__)
 
 
 class CheckpointExporter:
-    """Writes a head to a directory a restarted engine can serve directly.
-
-    The weights go out in on-disk DFlash naming and the serving dtype, beside a
-    verbatim copy of the `config.json` the engine is already running.
-    """
-
     def __init__(
         self, writer: CheckpointWriter, weights: HeadWeights, source_dir: Path
     ) -> None:
-        """
+        """Writes a head to a directory a restarted engine can serve directly.
+
+        The weights go out in on-disk DFlash naming and the serving dtype, beside a
+        verbatim copy of the `config.json` the engine is already running.
+
         Args:
             writer: Writes the safetensors file and the config.
             weights: Exports the head's parameter tree.

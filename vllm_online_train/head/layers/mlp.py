@@ -6,10 +6,9 @@ from vllm_online_train.head.arch import DFlashHeadArch
 
 
 class DFlashMLP(nn.Module):
-    """SwiGLU with a fused gate/up projection, matching the serving parameter names."""
-
     def __init__(self, arch: DFlashHeadArch) -> None:
-        """
+        """SwiGLU with a fused gate/up projection, matching the serving parameter names.
+
         Args:
             arch: Supplies the hidden and intermediate widths.
         """

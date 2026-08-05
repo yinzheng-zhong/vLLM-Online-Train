@@ -1,25 +1,26 @@
 import torch
 from torch import nn
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class EngineStateProvider:
-    """The only holder of the target model handle.
-
-    Owns the borrowed embedding table, the borrowed vocabulary projection and the
-    target's own distribution. The head borrows through it and the objective scores
-    through it, so neither knows where the target lives.
-
-    Serves everything on the engine's device. `MirroredStateProvider` wraps this to
-    serve it from a second one.
-    """
-
     def __init__(
         self,
         target_model: nn.Module,
         device: torch.device,
         serving_dtype: torch.dtype,
     ) -> None:
-        """
+        """The only holder of the target model handle.
+
+        Owns the borrowed embedding table, the borrowed vocabulary projection and the
+        target's own distribution. The head borrows through it and the objective scores
+        through it, so neither knows where the target lives.
+
+        Serves everything on the engine's device. `MirroredStateProvider` wraps this to
+        serve it from a second one.
+
         Args:
             target_model: The model the engine is serving.
             device: Where its weights live.
@@ -42,6 +43,9 @@ class EngineStateProvider:
             )
         self._embed = embed
         self._lm_head = lm_head
+        logger.debug(
+            "engine state provider bound to %s, serving dtype %s", device, serving_dtype
+        )
 
     @property
     def device(self) -> torch.device:

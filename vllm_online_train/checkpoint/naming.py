@@ -1,8 +1,11 @@
 from collections.abc import Iterable, Iterator
 
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.head.arch import DFlashHeadArch
+
+logger = init_logger(__name__)
 
 
 class WeightNameRewriter:
@@ -31,6 +34,12 @@ class WeightNameRewriter:
         Yields:
             One `(name, tensor)` pair per on-disk tensor.
         """
+        logger.debug(
+            "Rewriting fused head weights: q_size=%d, kv_size=%d, intermediate_size=%d",
+            arch.q_size,
+            arch.kv_size,
+            arch.intermediate_size,
+        )
         for name, tensor in named_tensors:
             if any(shared in name for shared in self.SHARED_WITH_TARGET):
                 continue

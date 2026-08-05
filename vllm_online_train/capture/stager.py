@@ -1,22 +1,24 @@
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.capture.records import CapturedChunk
 from vllm_online_train.config.shapes import EngineShapes
 
+logger = init_logger(__name__)
+
 
 class FeatureStager:
-    """Gathers selected positions on the device and copies them to host memory.
-
-    Owns one pinned staging buffer, reused every step, and one side stream the copy is
-    issued on. The buffers are allocated outside any inference-mode region, because a
-    tensor created under `inference_mode` cannot join an autograd graph and `.clone()`
-    inherits the flag: the escape is to `copy_` into tensors that already exist.
-    """
-
     def __init__(
         self, shapes: EngineShapes, capacity: int, device: torch.device
     ) -> None:
-        """
+        """Gathers selected positions on the device and copies them to host memory.
+
+        Owns one pinned staging buffer, reused every step, and one side stream the
+        copy is issued on. The buffers are allocated outside any inference-mode
+        region, because a tensor created under `inference_mode` cannot join an
+        autograd graph and `.clone()` inherits the flag: the escape is to `copy_` into
+        tensors that already exist.
+
         Args:
             shapes: Supplies the feature and hidden widths.
             capacity: Positions the staging buffer holds, i.e. `max_rollout_tokens`.
@@ -41,6 +43,12 @@ class FeatureStager:
         self._slices: list[tuple[str, int, int]] = []
         self._staged = 0
         self._in_flight = False
+        logger.debug(
+            "FeatureStager configured: capacity=%d, width=%d, device=%s",
+            capacity,
+            width,
+            device,
+        )
 
     @property
     def staged(self) -> int:

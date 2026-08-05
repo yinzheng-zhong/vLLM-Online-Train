@@ -1,18 +1,21 @@
 import json
 import os
 
+from vllm.logger import init_logger
+
 from vllm_online_train.config.factory import SettingsFactory
 from vllm_online_train.config.settings import OnlineTrainSettings
 
+logger = init_logger(__name__)
+
 
 class SettingsLoader:
-    """Reads `OnlineTrainSettings` from the environment."""
-
     CONFIG_ENV = "ONLINE_TRAIN_CONFIG"
     """Path to a JSON file of flat settings fields, or inline JSON."""
 
     def __init__(self, factory: SettingsFactory) -> None:
-        """
+        """Reads `OnlineTrainSettings` from the environment.
+
         Args:
             factory: Routes the flat mapping into sections.
         """
@@ -44,6 +47,9 @@ class SettingsLoader:
         fields = {k: v for k, v in fields.items() if not k.startswith("_")}
         # Pointing the variable at a config is itself the opt-in.
         fields.setdefault("enabled", True)
+        logger.debug(
+            "Parsed %d settings field(s), enabled=%s", len(fields), fields["enabled"]
+        )
         return self.factory.create(fields)
 
     def _parse(self, raw: str) -> dict:
@@ -68,6 +74,9 @@ class SettingsLoader:
                 )
             with open(path) as handle:
                 text = handle.read()
+            logger.debug("Loading settings from file %s", path)
+        else:
+            logger.debug("Loading settings from inline JSON")
 
         fields = json.loads(text)
         if not isinstance(fields, dict):

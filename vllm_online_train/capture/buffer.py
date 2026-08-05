@@ -1,22 +1,15 @@
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.capture.pool import PoolSampler
 from vllm_online_train.capture.records import BufferStats, PendingRollout, RolloutRecord
 from vllm_online_train.config.settings import BufferSettings
 from vllm_online_train.config.shapes import EngineShapes
 
+logger = init_logger(__name__)
+
 
 class RolloutBuffer:
-    """Host-side pool of finished rollouts, with capacity counted in tokens.
-
-    Requests accumulate into a `PendingRollout` as their chunks arrive, then are
-    concatenated into a `RolloutRecord` and admitted to the pool when they finish.
-
-    This is the boundary between the two threads. The engine thread is the only writer;
-    the trainer thread only reads, and an admitted record is immutable, so a draw needs
-    no lock -- only a pool that cannot be resized underneath it.
-    """
-
     def __init__(
         self,
         settings: BufferSettings,
@@ -24,7 +17,15 @@ class RolloutBuffer:
         sampler: PoolSampler,
         stats: BufferStats,
     ) -> None:
-        """
+        """Host-side pool of finished rollouts, with capacity counted in tokens.
+
+        Requests accumulate into a `PendingRollout` as their chunks arrive, then are
+        concatenated into a `RolloutRecord` and admitted to the pool when they finish.
+
+        This is the boundary between the two threads. The engine thread is the only
+        writer; the trainer thread only reads, and an admitted record is immutable, so
+        a draw needs no lock -- only a pool that cannot be resized underneath it.
+
         Args:
             settings: Capacity and the length bounds.
             shapes: Supplies `D`, which sets the minimum usable rollout length.
@@ -130,6 +131,7 @@ class RolloutBuffer:
         elif not pending.dropped:
             pending.discard()
         self.stats.count_drop(reason)
+        logger.debug("dropped rollout %s: reason=%s", req_id, reason)
 
     def finish(self, req_id: str) -> RolloutRecord | None:
         """Seal a request and admit it to the pool.
@@ -162,6 +164,13 @@ class RolloutBuffer:
             return None
 
         self._admit(record)
+        logger.debug(
+            "admitted rollout %s: %d tokens, pool now %d rollouts/%d tokens",
+            req_id,
+            record.num_tokens,
+            self.num_rollouts,
+            self.num_tokens,
+        )
         return record
 
     def _admit(self, record: RolloutRecord) -> None:

@@ -1,12 +1,15 @@
 from typing import TYPE_CHECKING
 
 import torch
+from vllm.logger import init_logger
 
 from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.config.shapes import EngineShapes, ResolvedConfig
 
 if TYPE_CHECKING:
     from vllm.config import SpeculativeConfig, VllmConfig
+
+logger = init_logger(__name__)
 
 
 class ConfigResolver:
@@ -78,6 +81,15 @@ class ConfigResolver:
         if gamma is None:
             gamma = settings.objective.default_gamma(block_size)
 
+        logger.debug(
+            "Resolved online-train shapes: block_size=%d hidden_size=%d "
+            "num_features=%d feature_dtype=%s position_decay_gamma=%.3f",
+            shapes.block_size,
+            shapes.hidden_size,
+            shapes.num_features,
+            shapes.feature_dtype,
+            gamma,
+        )
         return ResolvedConfig(
             settings=settings, shapes=shapes, position_decay_gamma=gamma
         )

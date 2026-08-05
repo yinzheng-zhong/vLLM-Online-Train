@@ -1,15 +1,22 @@
 import torch
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class DeviceTransfer:
-    """Moves collated host tensors onto the training device."""
-
     def __init__(self, device: torch.device) -> None:
-        """
+        """Moves collated host tensors onto the training device.
+
         Args:
             device: Destination for every tensor passed to `send`.
         """
         self.device = device
+        logger.debug(
+            "device transfer targets %s (pin_memory=%s)",
+            device,
+            device.type == "cuda",
+        )
 
     def send(self, tensor: torch.Tensor) -> torch.Tensor:
         """Copy one tensor to the device.

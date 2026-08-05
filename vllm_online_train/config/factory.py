@@ -1,6 +1,8 @@
 from dataclasses import fields
 from typing import Any
 
+from vllm.logger import init_logger
+
 from vllm_online_train.config.settings import (
     AnchorSettings,
     BookkeepingSettings,
@@ -13,6 +15,8 @@ from vllm_online_train.config.settings import (
     PlacementSettings,
     PublishSettings,
 )
+
+logger = init_logger(__name__)
 
 
 class SettingsFactory:
@@ -94,4 +98,10 @@ class SettingsFactory:
         sections = {
             name: cls(**routed[name]) for name, cls in self.SECTIONS.items()
         }
+        logger.debug(
+            "Routed %d online-train keys into %d sections (%d at top level)",
+            sum(len(fields_) for fields_ in routed.values()),
+            len(sections),
+            len(top),
+        )
         return OnlineTrainSettings(**top, **sections)

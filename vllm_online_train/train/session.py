@@ -1,13 +1,15 @@
+from vllm.logger import init_logger
+
 from vllm_online_train.contracts.sink import MetricsSink
 from vllm_online_train.step import EngineStep
 from vllm_online_train.train.gate import IdleGate
 from vllm_online_train.train.manager import OnlineTrainManager
 from vllm_online_train.train.thread import TrainerThread
 
+logger = init_logger(__name__)
+
 
 class OnlineTrainSession:
-    """One handle over everything the capture hook drives."""
-
     def __init__(
         self,
         manager: OnlineTrainManager,
@@ -15,7 +17,8 @@ class OnlineTrainSession:
         thread: TrainerThread,
         sink: MetricsSink,
     ) -> None:
-        """
+        """One handle over everything the capture hook drives.
+
         Args:
             manager: Owns the capture, the pool, the head and the optimizer.
             gate: Records engine steps and decides when training may run.
@@ -32,6 +35,13 @@ class OnlineTrainSession:
         self.thread.start()
         shapes = self.manager.config.shapes
         settings = self.manager.config.settings
+        logger.debug(
+            "Starting online train session (block_size=%d, buffer_capacity_tokens=%d, "
+            "publish_mode=%s)",
+            shapes.block_size,
+            settings.buffer.buffer_capacity_tokens,
+            settings.publish.publish_mode,
+        )
         self.sink.write(
             "start",
             {
@@ -62,5 +72,6 @@ class OnlineTrainSession:
 
     def stop(self) -> None:
         """Stop the trainer thread and release the metrics sink."""
+        logger.debug("Stopping online train session")
         self.thread.stop()
         self.sink.close()

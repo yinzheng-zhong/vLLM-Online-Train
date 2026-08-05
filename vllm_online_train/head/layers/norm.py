@@ -3,10 +3,9 @@ from torch import nn
 
 
 class RMSNorm(nn.Module):
-    """RMS norm accumulated in fp32, matching vLLM's `RMSNorm` numerics."""
-
     def __init__(self, hidden_size: int, eps: float) -> None:
-        """
+        """RMS norm accumulated in fp32, matching vLLM's `RMSNorm` numerics.
+
         Args:
             hidden_size: Width to normalise over.
             eps: Added to the variance before the reciprocal square root.

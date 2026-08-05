@@ -1,3 +1,8 @@
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
+
+
 class TargetLayerPlanner:
     """Chooses which target layers a head reads features from."""
 
@@ -32,7 +37,14 @@ class TargetLayerPlanner:
 
         top = self._highest_id(num_target_layers, num_features)
         stride = max((top - 1) // (num_features - 1), 1)
-        return [1 + i * stride for i in range(num_features)]
+        layer_ids = [1 + i * stride for i in range(num_features)]
+        logger.debug(
+            "Placed %d feature layers with stride %d: %s",
+            num_features,
+            stride,
+            layer_ids,
+        )
+        return layer_ids
 
     @staticmethod
     def _highest_id(num_target_layers: int, num_features: int) -> int:

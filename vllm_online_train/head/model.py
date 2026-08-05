@@ -6,10 +6,9 @@ from vllm_online_train.head.layers.norm import RMSNorm
 
 
 class DFlashModel(nn.Module):
-    """Mirrors `DFlashQwen3Model`, so `state_dict()` keys line up under `model.`."""
-
     def __init__(self, arch: DFlashHeadArch) -> None:
-        """
+        """Mirrors `DFlashQwen3Model`, so `state_dict()` keys line up under `model.`.
+
         Args:
             arch: Supplies the layer count and every width.
         """

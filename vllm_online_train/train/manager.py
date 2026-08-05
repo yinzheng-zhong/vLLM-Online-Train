@@ -18,14 +18,6 @@ logger = init_logger(__name__)
 
 
 class OnlineTrainManager:
-    """The single handle over the capture, the pool, the head and the optimizer.
-
-    Both threads hold it: the engine thread calls `observe` and `abort`, the trainer
-    thread calls `train_step` and `metrics`. The split is by object rather than by lock
-    -- the capture writes the pool and the trainer only reads it -- so nothing here
-    blocks a serving step.
-    """
-
     def __init__(
         self,
         config: ResolvedConfig,
@@ -37,7 +29,13 @@ class OnlineTrainManager:
         exporter: CheckpointExporter,
         publisher: WeightPublisher,
     ) -> None:
-        """
+        """The single handle over the capture, the pool, the head and the optimizer.
+
+        Both threads hold it: the engine thread calls `observe` and `abort`, the trainer
+        thread calls `train_step` and `metrics`. The split is by object rather than by
+        lock -- the capture writes the pool and the trainer only reads it -- so nothing
+        here blocks a serving step.
+
         Args:
             config: Settings paired with the resolved shapes.
             provider: Owns the target handle everything else borrows through.
@@ -131,6 +129,10 @@ class OnlineTrainManager:
             drafter_model: The `DFlashQwen3ForCausalLM`, or `None`.
         """
         self._drafter_model = drafter_model
+        logger.debug(
+            "Publish target set to %s",
+            "none" if drafter_model is None else type(drafter_model).__name__,
+        )
 
     def publish(self) -> None:
         """Push the trained head into the live drafter, if one was resolved."""
@@ -141,6 +143,10 @@ class OnlineTrainManager:
             )
             return
         self.publisher.publish(self._drafter_model, self.head, self.head.arch)
+        logger.debug(
+            "Published trained head into live drafter at step %d",
+            self.trainer.step_count,
+        )
 
     def export_checkpoint(self, directory: str | Path) -> str:
         """Write a directory a restarted engine can serve directly.

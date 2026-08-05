@@ -49,15 +49,15 @@ logger = init_logger(__name__)
 
 
 class SessionAssembler:
-    """Assembles the whole training subsystem from a model runner and settings.
-
-    This is the package's only wiring site for a training session: every collaborator
-    is constructed here and injected downwards, and nothing below this point looks
-    anything up.
-    """
-
     def __init__(self) -> None:
-        """Construct the collaborators that carry no settings and are shared."""
+        """Assembles the whole training subsystem from a model runner and settings.
+
+        This is the package's only wiring site for a training session: every
+        collaborator is constructed here and injected downwards, and nothing below this
+        point looks anything up.
+
+        Construct the collaborators that carry no settings and are shared.
+        """
         self.masks = BlockMaskBuilder()
         self.naming = WeightNameRewriter()
         self.weights = HeadWeights()
@@ -158,6 +158,7 @@ class SessionAssembler:
             config.settings.placement.train_device, engine.device
         )
         if device == engine.device:
+            logger.debug("training on the engine's own device %s; no mirror", device)
             return engine
 
         mirror = MirroredStateProvider(

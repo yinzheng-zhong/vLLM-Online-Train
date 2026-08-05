@@ -11,12 +11,6 @@ logger = init_logger(__name__)
 
 
 class TrainerThread:
-    """Polls the gate and runs training micro-batches while it is open.
-
-    The gate is re-checked between micro-batches, so a step that lands mid-opening
-    ends it: micro-batch duration is the latency quantum, not the poll interval.
-    """
-
     def __init__(
         self,
         gate: IdleGate,
@@ -25,7 +19,11 @@ class TrainerThread:
         bookkeeping: BookkeepingSettings,
         sink: MetricsSink,
     ) -> None:
-        """
+        """Polls the gate and runs training micro-batches while it is open.
+
+        The gate is re-checked between micro-batches, so a step that lands mid-opening
+        ends it: micro-batch duration is the latency quantum, not the poll interval.
+
         Args:
             gate: Decides when training may hold the GPU.
             runner: Runs one micro-step and reports counters.
@@ -66,6 +64,7 @@ class TrainerThread:
         Args:
             timeout: Seconds to wait for the join.
         """
+        logger.debug("Stopping online trainer thread")
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=timeout)

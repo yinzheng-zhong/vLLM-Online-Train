@@ -14,13 +14,6 @@ ProjectFn = Callable[[torch.Tensor], torch.Tensor]
 
 
 class SFTObjective:
-    """Full-vocabulary KL against the target, over every scored position.
-
-    Takes hidden states rather than logits so the vocabulary projection lives inside
-    the checkpointed chunk: a `[N, vocab]` fp32 log-softmax retained for backward is
-    far larger than the `[N, H]` input it was computed from.
-    """
-
     def __init__(
         self,
         settings: ObjectiveSettings,
@@ -30,7 +23,12 @@ class SFTObjective:
         student_project: ProjectFn,
         teacher_project: ProjectFn,
     ) -> None:
-        """
+        """Full-vocabulary KL against the target, over every scored position.
+
+        Takes hidden states rather than logits so the vocabulary projection lives inside
+        the checkpointed chunk: a `[N, vocab]` fp32 log-softmax retained for backward is
+        far larger than the `[N, H]` input it was computed from.
+
         Args:
             settings: KL direction, auxiliary CE weight and chunk size.
             divergence: Computes per-row KL.

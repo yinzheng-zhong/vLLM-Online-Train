@@ -1,19 +1,27 @@
 import hashlib
 
+from vllm.logger import init_logger
+
 from vllm_online_train.config.settings import CaptureSettings
+
+logger = init_logger(__name__)
 
 
 class RequestSampler:
-    """Decides once per request whether its activations are captured."""
-
     def __init__(self, settings: CaptureSettings, seed: int) -> None:
-        """
+        """Decides once per request whether its activations are captured.
+
         Args:
             settings: Supplies the capture sample rate.
             seed: Keys the hash, so the decision is reproducible across runs.
         """
         self.settings = settings
         self.seed = seed
+        logger.debug(
+            "RequestSampler configured: capture_sample_rate=%s, seed=%d",
+            settings.capture_sample_rate,
+            seed,
+        )
 
     def accepts(self, req_id: str) -> bool:
         """Whether this request is captured.

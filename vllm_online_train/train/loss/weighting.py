@@ -4,10 +4,9 @@ from vllm_online_train.collate.batch import ReplayBatch
 
 
 class PositionDecay:
-    """In-block position weighting, `w_k = exp(-(k-1)/gamma)`."""
-
     def __init__(self, gamma: float) -> None:
-        """
+        """In-block position weighting, `w_k = exp(-(k-1)/gamma)`.
+
         Args:
             gamma: Decay constant. 0 selects a uniform mean.
         """

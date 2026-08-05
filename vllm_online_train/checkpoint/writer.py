@@ -12,18 +12,16 @@ logger = init_logger(__name__)
 
 
 class CheckpointWriter:
-    """Writes a DFlash draft directory in the on-disk format.
-
-    `embed_tokens` and `lm_head` are deliberately omitted: when a DFlash checkpoint
-    lacks them the serving path binds the target's own modules onto the draft, which
-    is the sharing the objective assumes.
-    """
-
     CONFIG_FILENAME = "config.json"
     WEIGHTS_FILENAME = "model.safetensors"
 
     def __init__(self, naming: WeightNameRewriter) -> None:
-        """
+        """Writes a DFlash draft directory in the on-disk format.
+
+        `embed_tokens` and `lm_head` are deliberately omitted: when a DFlash checkpoint
+        lacks them the serving path binds the target's own modules onto the draft, which
+        is the sharing the objective assumes.
+
         Args:
             naming: Un-fuses the head's parameters into on-disk naming.
         """

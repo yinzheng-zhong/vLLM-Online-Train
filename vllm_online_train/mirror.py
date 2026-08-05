@@ -1,17 +1,13 @@
 import torch
 import torch.nn.functional as F
+from vllm.logger import init_logger
 
 from vllm_online_train.contracts.provider import StateProvider
 
+logger = init_logger(__name__)
+
 
 class MirroredStateProvider:
-    """Serves the borrowed target state from a device other than the engine's.
-
-    Holds its own copy of the target's vocabulary projection on the training device and
-    scores the teacher there, so no part of a training step runs on the serving device.
-    The wrapped provider stays the only holder of the target handle.
-    """
-
     PARITY_TOLERANCE: float = 0.02
     """Largest deviation from the engine's own projection that `verify_parity` accepts,
     as a fraction of the engine's largest logit."""
@@ -19,7 +15,12 @@ class MirroredStateProvider:
     def __init__(
         self, source: StateProvider, device: torch.device, dtype: torch.dtype
     ) -> None:
-        """
+        """Serves the borrowed target state from a device other than the engine's.
+
+        Holds its own copy of the target's vocabulary projection on the training device
+        and scores the teacher there, so no part of a training step runs on the serving
+        device. The wrapped provider stays the only holder of the target handle.
+
         Args:
             source: Holds the target handle, on the engine's device.
             device: Where the head trains.
@@ -28,6 +29,9 @@ class MirroredStateProvider:
         self._source = source
         self._device = device
         self._projection = source.lm_head_weight(device).to(dtype)
+        logger.debug(
+            "mirrored state provider built on %s at %s", device, self._projection.dtype
+        )
 
     @property
     def device(self) -> torch.device:

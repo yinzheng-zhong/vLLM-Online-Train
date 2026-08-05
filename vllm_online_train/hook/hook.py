@@ -13,21 +13,19 @@ logger = init_logger(__name__)
 
 
 class CaptureHook:
-    """Tees one engine step's training features out of the model runner.
-
-    The wrapped method receives everything the objective needs in a single call, once
-    per engine step, at a point where the step's sampling has resolved but the next
-    step has not begun. Any exception disables capture for the rest of the process
-    rather than reaching the serving path.
-    """
-
     def __init__(
         self,
         patcher: MethodPatcher,
         loader: SettingsLoader,
         state: CaptureState,
     ) -> None:
-        """
+        """Tees one engine step's training features out of the model runner.
+
+        The wrapped method receives everything the objective needs in a single call,
+        once per engine step, at a point where the step's sampling has resolved but the
+        next step has not begun. Any exception disables capture for the rest of the
+        process rather than reaching the serving path.
+
         Args:
             patcher: Wraps and unwraps the runner method.
             loader: Reads the operator's settings.
@@ -130,6 +128,7 @@ class CaptureHook:
             self.state.disable("the assembler declined to build a session")
             return False
         self.state.activate(session)
+        logger.debug("Online training session built and activated")
         return True
 
     def _read_settings(self) -> OnlineTrainSettings | None:

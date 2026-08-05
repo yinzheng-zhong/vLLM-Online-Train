@@ -1,17 +1,19 @@
 import time
 
+from vllm.logger import init_logger
+
 from vllm_online_train.config.settings import GateSettings
+
+logger = init_logger(__name__)
 
 
 class IdleGate:
-    """Shared step state, written by the engine thread and read by the trainer.
-
-    Lock-free: both fields are single machine words written by one thread and read by
-    another, and the reader only needs a recent value.
-    """
-
     def __init__(self, settings: GateSettings) -> None:
-        """
+        """Shared step state, written by the engine thread and read by the trainer.
+
+        Lock-free: both fields are single machine words written by one thread and read
+        by another, and the reader only needs a recent value.
+
         Args:
             settings: Quiet time, busy-token bound and poll interval.
         """
@@ -51,12 +53,15 @@ class IdleGate:
         if self._opened_at is None:
             self._opened_at = time.monotonic()
             self._open_count += 1
+            logger.debug("Gate opened (opening #%d)", self._open_count)
 
     def mark_closed(self) -> None:
         """Stop timing the current opening, if any."""
         if self._opened_at is not None:
-            self._open_seconds += time.monotonic() - self._opened_at
+            duration = time.monotonic() - self._opened_at
+            self._open_seconds += duration
             self._opened_at = None
+            logger.debug("Gate closed after %.3fs", duration)
 
     def as_metrics(self) -> dict[str, float]:
         """Open share, opening count and the engine's step counters."""

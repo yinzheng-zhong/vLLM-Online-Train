@@ -1,6 +1,10 @@
 from collections.abc import Iterable
 
+from vllm.logger import init_logger
+
 from vllm_online_train.head.arch import DFlashHeadArch
+
+logger = init_logger(__name__)
 
 
 class DraftConfigBuilder:
@@ -82,4 +86,11 @@ class DraftConfigBuilder:
             config["bos_token_id"] = bos_token_id
         if eos_token_id is not None:
             config["eos_token_id"] = eos_token_id
+        logger.debug(
+            "Built draft config: block_size=%d, num_target_layers=%d, "
+            "target_layer_ids=%s",
+            arch.block_size,
+            num_target_layers,
+            target_layer_ids,
+        )
         return config
