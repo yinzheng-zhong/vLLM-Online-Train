@@ -17,15 +17,18 @@ from pathlib import Path
 import torch
 from vllm.logger import init_logger
 
-from vllm_online_train.checkpoint.config import DraftConfigBuilder
-from vllm_online_train.checkpoint.layers import TargetLayerPlanner
-from vllm_online_train.checkpoint.naming import WeightNameRewriter
-from vllm_online_train.checkpoint.plan import InitHeadPlanner, InitHeadRequest
-from vllm_online_train.checkpoint.writer import CheckpointWriter
-from vllm_online_train.head.arch import ArchFactory
-from vllm_online_train.head.factory import HeadFactory
-from vllm_online_train.head.masks import BlockMaskBuilder
-from vllm_online_train.head.weights import HeadWeights
+from vllm_online_train.training.checkpoint.draft_config import DraftConfigBuilder
+from vllm_online_train.training.checkpoint.init_plan import (
+    InitHeadPlanner,
+    InitHeadRequest,
+)
+from vllm_online_train.training.checkpoint.weight_names import WeightNameRewriter
+from vllm_online_train.training.checkpoint.writer import CheckpointWriter
+from vllm_online_train.training.head.arch import ArchFactory
+from vllm_online_train.training.head.block_masks import BlockMaskBuilder
+from vllm_online_train.training.head.factory import HeadFactory
+from vllm_online_train.training.head.feature_layers import TargetLayerPlanner
+from vllm_online_train.training.head.weights import HeadWeights
 
 logger = init_logger(__name__)
 

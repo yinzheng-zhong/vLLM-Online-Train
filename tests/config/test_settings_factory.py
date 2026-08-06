@@ -7,12 +7,12 @@ the one place that mapping lives, so an unrouted field is a silently ignored set
 
 import json
 from dataclasses import fields
-from pathlib import Path
 
 import pytest
 
 from tests.conftest import settings_factory
-from vllm_online_train.config.factory import SettingsFactory
+from tests.instances import REPO_ROOT
+from vllm_online_train.config.settings_factory import SettingsFactory
 
 
 def test_flat_keys_reach_their_sections():
@@ -90,7 +90,7 @@ def test_known_fields_covers_the_master_switch():
 
 def test_the_shipped_template_still_routes():
     """`train.example.json` is what an operator copies, so it must parse unchanged."""
-    template = Path(__file__).resolve().parents[2] / "train.example.json"
+    template = REPO_ROOT / "train.example.json"
     if not template.is_file():
         pytest.skip("template not present")
     flat = {

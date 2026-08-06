@@ -34,18 +34,18 @@ from tests.instances import (
     weight_naming,
     weight_publisher,
 )
-from vllm_online_train.capture.buffer import RolloutBuffer
-from vllm_online_train.capture.pool import PoolSampler
-from vllm_online_train.capture.records import BufferStats, RolloutRecord
-from vllm_online_train.collate.anchors import AnchorSampler
-from vllm_online_train.collate.collator import RolloutCollator
-from vllm_online_train.collate.transfer import DeviceTransfer
 from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.config.shapes import EngineShapes, ResolvedConfig
-from vllm_online_train.head.arch import DFlashHeadArch
-from vllm_online_train.train.loss.sft import SFTObjective
-from vllm_online_train.train.loss.weighting import PositionDecay
-from vllm_online_train.train.optim.trainer import OnlineTrainer
+from vllm_online_train.engine.capture.pool_sampler import PoolSampler
+from vllm_online_train.engine.capture.records import BufferStats, RolloutRecord
+from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
+from vllm_online_train.training.collate.anchor_sampler import AnchorSampler
+from vllm_online_train.training.collate.device_transfer import DeviceTransfer
+from vllm_online_train.training.collate.rollout_collator import RolloutCollator
+from vllm_online_train.training.head.arch import DFlashHeadArch
+from vllm_online_train.training.loss.position_decay import PositionDecay
+from vllm_online_train.training.loss.sft_objective import SFTObjective
+from vllm_online_train.training.optim.trainer import OnlineTrainer
 
 __all__ = [
     "arch_factory",

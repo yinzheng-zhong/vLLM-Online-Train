@@ -1,18 +1,25 @@
 """Train a speculative draft head from live traffic on a serving vLLM engine.
 
-DFlash is the only head architecture wired up so far, and the layout draws the line
-where a second one would go:
+Two halves, split by what they talk to. `engine/` reads the serving engine; `training/`
+knows nothing about it and would be the same for a second head architecture:
 
-    config/      the operator's settings, sectioned, plus engine-resolved shapes
-    contracts/   the structural interfaces the parts depend on
-    hook/        the foothold into the engine
-    capture/     engine step -> rollout pool -- head-agnostic
-    collate/     rollout pool -> anchored replay batches -- head-agnostic
-    head/        the DFlash module, its layers and its mask geometry -- typed
-    checkpoint/  the on-disk format, export and hot publish -- typed
-    train/       the objective, the optimizer loop, the gate and the thread
-    assembler.py the one wiring site for a training session
-    cli.py       `online-train-init-head`
+    engine/          everything that touches vLLM
+      hook/          the foothold: the method patch and the settings it loads
+      capture/       engine step -> rollout pool -- head-agnostic
+      state/         the borrowed target state, on the engine's device or a second one
+    training/        everything that trains the head
+      collate/       rollout pool -> anchored replay batches -- head-agnostic
+      head/          the DFlash module, its layers and its mask geometry -- typed
+      checkpoint/    the on-disk format, export and hot publish -- typed
+      loss/, optim/  the objective and the optimizer loop
+    config/          the operator's settings, sectioned, plus engine-resolved shapes
+    contracts/       the structural interfaces the parts depend on
+    step.py          one engine step's activations, as the hook hands them over
+    assembler.py     the one wiring site for a training session
+    cli.py           `online-train-init-head`
+
+`config/` and `contracts/` are the leaf layer both halves depend on, which is what
+keeps `register()` off the training stack.
 
 Enable it with two environment variables:
 
@@ -39,7 +46,7 @@ def register() -> None:
     no import of the training stack.
     """
     try:
-        from vllm_online_train.hook import capture_hook
+        from vllm_online_train.engine.hook import capture_hook
 
         capture_hook.install()
     except Exception:

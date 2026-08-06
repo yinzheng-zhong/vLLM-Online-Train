@@ -74,8 +74,8 @@ def test_the_settings_layer_stays_leaf_level(module):
 def test_the_hook_is_wired_once_and_shared():
     """`register()` is called from several vLLM processes, so the install must go
     through one instance rather than a fresh one per call."""
-    import vllm_online_train.hook as hook_package
-    from vllm_online_train.hook import capture_hook
+    import vllm_online_train.engine.hook as hook_package
+    from vllm_online_train.engine.hook import capture_hook
 
     assert hook_package.capture_hook is capture_hook
     assert capture_hook.loader.factory is not None
@@ -110,14 +110,11 @@ def test_the_install_path_does_not_import_the_training_stack():
     training stack belongs behind the first usable step, not in that import."""
     deferred = (
         "vllm_online_train.assembler",
-        "vllm_online_train.capture",
-        "vllm_online_train.checkpoint",
-        "vllm_online_train.collate",
-        "vllm_online_train.head",
-        "vllm_online_train.provider",
-        "vllm_online_train.train",
+        "vllm_online_train.engine.capture",
+        "vllm_online_train.engine.state.engine",
+        "vllm_online_train.training",
     )
-    spec = importlib.util.find_spec("vllm_online_train.hook")
+    spec = importlib.util.find_spec("vllm_online_train.engine.hook")
     paths = list(Path(spec.submodule_search_locations[0]).rglob("*.py"))
 
     for path in paths:

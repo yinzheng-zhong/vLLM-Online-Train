@@ -9,24 +9,29 @@ conftest without an `__init__.py` under two module names, which would give the t
 two copies of every instance and make an identity assertion meaningless.
 """
 
-from vllm_online_train.capture.positions import ValidPositions
-from vllm_online_train.checkpoint.config import DraftConfigBuilder
-from vllm_online_train.checkpoint.layers import TargetLayerPlanner
-from vllm_online_train.checkpoint.locator import DrafterLocator
-from vllm_online_train.checkpoint.naming import WeightNameRewriter
-from vllm_online_train.checkpoint.publisher import WeightPublisher
-from vllm_online_train.checkpoint.writer import CheckpointWriter
-from vllm_online_train.collate.blocks import BlockBuilder
-from vllm_online_train.config.factory import SettingsFactory
-from vllm_online_train.config.placement import DevicePlacement
+from pathlib import Path
+
+from vllm_online_train.config.device_placement import DevicePlacement
 from vllm_online_train.config.resolver import ConfigResolver
-from vllm_online_train.head.arch import ArchFactory
-from vllm_online_train.head.factory import HeadFactory
-from vllm_online_train.head.masks import BlockMaskBuilder
-from vllm_online_train.head.weights import HeadWeights
-from vllm_online_train.train.loss.divergence import KLDivergence
-from vllm_online_train.train.loss.teacher import TeacherScorer
-from vllm_online_train.train.optim.schedule import ScheduleFactory
+from vllm_online_train.config.settings_factory import SettingsFactory
+from vllm_online_train.engine.capture.valid_positions import ValidPositions
+from vllm_online_train.training.checkpoint.draft_config import DraftConfigBuilder
+from vllm_online_train.training.checkpoint.drafter_locator import DrafterLocator
+from vllm_online_train.training.checkpoint.weight_names import WeightNameRewriter
+from vllm_online_train.training.checkpoint.weight_publisher import WeightPublisher
+from vllm_online_train.training.checkpoint.writer import CheckpointWriter
+from vllm_online_train.training.collate.block_builder import BlockBuilder
+from vllm_online_train.training.head.arch import ArchFactory
+from vllm_online_train.training.head.block_masks import BlockMaskBuilder
+from vllm_online_train.training.head.factory import HeadFactory
+from vllm_online_train.training.head.feature_layers import TargetLayerPlanner
+from vllm_online_train.training.head.weights import HeadWeights
+from vllm_online_train.training.loss.kl_divergence import KLDivergence
+from vllm_online_train.training.loss.teacher_scorer import TeacherScorer
+from vllm_online_train.training.optim.schedule_factory import ScheduleFactory
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+"""The repository root, for tests that read a file shipped beside the package."""
 
 settings_factory = SettingsFactory()
 config_resolver = ConfigResolver()

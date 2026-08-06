@@ -12,23 +12,33 @@ afford to train a draft head or cannot find a pretrained head. Furthuremore, GPU
 **DFlash is the only head architecture implemented today**, meaning vLLM's
 `method: "dflash"` speculator and checkpoints shaped like `z-lab/Qwen3-4B-DFlash-b16`.
 
+The package splits in two by what each half talks to: `engine/` reads the serving
+engine, `training/` knows nothing about it.
+
 | | |
 |---|---|
-| `config/` | the operator's settings, sectioned, plus engine-resolved shapes |
-| `contracts/` | the structural interfaces the parts depend on |
-| `hook/` | the foothold into the engine |
-| `capture/` | engine step → rollout pool — head-agnostic |
-| `collate/` | rollout pool → anchored replay batches — head-agnostic |
-| `head/` | the DFlash module, its layers and its mask geometry — DFlash-typed |
-| `checkpoint/` | the on-disk format, export and hot publish — DFlash-typed |
-| `train/` | the objective, the optimizer loop, the idle gate and the trainer thread |
-| `provider.py`, `mirror.py` | the borrowed target state, on the engine's device or a second one |
+| **`engine/`** | **everything that touches vLLM** |
+| `engine/hook/` | the foothold: the method patch, and the settings it loads |
+| `engine/capture/` | engine step → rollout pool — head-agnostic |
+| `engine/state/` | the borrowed target state, on the engine's device or a second one |
+| **`training/`** | **everything that trains the head** |
+| `training/collate/` | rollout pool → anchored replay batches — head-agnostic |
+| `training/head/` | the DFlash module, its layers, its mask geometry and the target layers that feed it — DFlash-typed |
+| `training/checkpoint/` | the on-disk format, export and hot publish — DFlash-typed |
+| `training/loss/`, `training/optim/` | the objective, and the optimizer loop it runs under |
+| `training/` (top) | the idle gate, the trainer thread, the metrics sink and the manager |
+| `config/`, `contracts/` | the leaf layer both halves depend on |
+| `step.py` | one engine step's activations, as the hook hands them over |
 | `assembler.py` | the one wiring site for a training session |
 | `cli.py` | `online-train-init-head` |
 
 `capture/`, `collate/` and the idle gate move hidden states and time, not architecture.
 `head/`, `checkpoint/` and the config resolver name DFlash, and are what a second
 architecture would have to generalise.
+
+`config/` and `contracts/` sit outside both halves because the hook needs the settings
+at install time. That is what keeps `register()` off the training stack entirely — a
+property `tests/test_wiring.py` pins.
 
 ## Why capture is cheap
 
@@ -50,13 +60,7 @@ Two things are *not* cheap, and it is worth being precise about them:
 - **Time is scavenged, not spare.** A training step is a full GPU step taken in the
   wall-clock gaps between engine steps, admitted by the idle gate. Nothing here
   reclaims idle SMs *within* a serving step.
-- **Memory is paid for in KV cache.** The trainer's footprint comes out of
-  `gpu_memory_utilization`, i.e. straight out of concurrency — unless you give it a
-  second GPU (see below), which is the one lever that buys it back.
-
-Neither the throughput nor the latency cost is measured in this repo. If that matters
-for your deployment, measure it — the `VLLM_PLUGINS` switch below is what gives you a
-clean baseline to measure against.
+- **Less available memory for KV cache.**
 
 ## Install
 
@@ -177,8 +181,8 @@ training step reads pinned host tensors and sends them to GPU 1, and nothing com
 back. What does not come for free is the **teacher**. Scoring it through the engine's
 own `compute_logits` would put a `[N, 151936]` projection back on the serving GPU and
 then drag the logits across the bus twice per step, once for the forward and once for
-the recompute. So `mirror.py` holds its own copy of the target's vocabulary projection
-on the training device (0.72 GiB at bf16) and projects there.
+the recompute. So `state/mirrored.py` holds its own copy of the target's vocabulary
+projection on the training device (0.72 GiB at bf16) and projects there.
 
 That copy is a bare matmul against the LM head, which is what vLLM's
 `LogitsProcessor` reduces to for Qwen3 and **not** what it reduces to in general — a
@@ -267,7 +271,7 @@ Each of these still trains while silently capping acceptance.
    an autograd graph and `.clone()` inherits the flag. Capture escapes by `copy_`-ing
    into buffers allocated outside it.
 6. **Publish aliasing.** `_build_context_kv_buffers` reassigns `torch.cat`
-   snapshots at new addresses; `checkpoint/publisher.py` restores the originals.
+   snapshots at new addresses; `checkpoint/weight_publisher.py` restores the originals.
 7. **Traffic memorisation.** The head trains on production traffic and the weights
    carry it. This is opt-in and must never be default-on.
 
