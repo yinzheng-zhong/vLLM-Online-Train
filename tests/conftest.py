@@ -363,8 +363,21 @@ def fake_vllm_config(
     )
 
 
+class FakeTargetBody(nn.Module):
+    """The decoder stack, holding the embedding table where vLLM holds it."""
+
+    def __init__(self, vocab: int, hidden: int) -> None:
+        """
+        Args:
+            vocab: Vocabulary size.
+            hidden: Hidden width.
+        """
+        super().__init__()
+        self.embed_tokens = nn.Embedding(vocab, hidden)
+
+
 class FakeTarget(nn.Module):
-    """A stand-in target exposing what `EngineStateProvider` reads."""
+    """A stand-in target laid out the way vLLM lays out a causal LM."""
 
     def __init__(self, vocab: int = VOCAB, hidden: int = HIDDEN) -> None:
         """
@@ -373,13 +386,14 @@ class FakeTarget(nn.Module):
             hidden: Hidden width.
         """
         super().__init__()
-        self.embed = nn.Embedding(vocab, hidden)
+        self.model = FakeTargetBody(vocab, hidden)
         self.lm_head = nn.Linear(hidden, vocab, bias=False)
         self.compute_logits_calls = 0
 
-    def get_input_embeddings(self) -> nn.Embedding:
+    @property
+    def embed(self) -> nn.Embedding:
         """The embedding table."""
-        return self.embed
+        return self.model.embed_tokens
 
     def compute_logits(self, hidden: torch.Tensor) -> torch.Tensor:
         """Project through the vocabulary head.
@@ -392,6 +406,34 @@ class FakeTarget(nn.Module):
         """
         self.compute_logits_calls += 1
         return self.lm_head(hidden)
+
+
+class FakeMultiModalTarget(nn.Module):
+    """A stand-in target laid out the way vLLM lays out a multimodal model."""
+
+    def __init__(self, vocab: int = VOCAB, hidden: int = HIDDEN) -> None:
+        """
+        Args:
+            vocab: Vocabulary size.
+            hidden: Hidden width.
+        """
+        super().__init__()
+        self.language_model = FakeTarget(vocab, hidden)
+
+    def get_language_model(self) -> FakeTarget:
+        """The text stack this delegates generation to."""
+        return self.language_model
+
+    def compute_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+        """Project through the language model's vocabulary head.
+
+        Args:
+            hidden: `[N, H]`.
+
+        Returns:
+            `[N, vocab]`.
+        """
+        return self.language_model.compute_logits(hidden)
 
 
 @pytest.fixture

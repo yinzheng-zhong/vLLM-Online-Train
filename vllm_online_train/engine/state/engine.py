@@ -2,12 +2,15 @@ import torch
 from torch import nn
 from vllm.logger import init_logger
 
+from vllm_online_train.engine.state.target_locator import TargetLocator
+
 logger = init_logger(__name__)
 
 
 class EngineStateProvider:
     def __init__(
         self,
+        locator: TargetLocator,
         target_model: nn.Module,
         device: torch.device,
         serving_dtype: torch.dtype,
@@ -22,6 +25,7 @@ class EngineStateProvider:
         serve it from a second one.
 
         Args:
+            locator: Finds the borrowed modules on the target.
             target_model: The model the engine is serving.
             device: Where its weights live.
             serving_dtype: The dtype the engine is configured to serve at.
@@ -32,17 +36,7 @@ class EngineStateProvider:
         self._target = target_model
         self._device = device
         self._serving_dtype = serving_dtype
-
-        embed = target_model.get_input_embeddings()
-        lm_head = getattr(target_model, "lm_head", None)
-        if embed is None or lm_head is None:
-            raise ValueError(
-                "Online training needs the target's embedding table and LM head, "
-                f"but {type(target_model).__name__} exposes "
-                f"embed={embed is not None}, lm_head={lm_head is not None}."
-            )
-        self._embed = embed
-        self._lm_head = lm_head
+        self._embed, self._lm_head = locator.find(target_model)
         logger.debug(
             "engine state provider bound to %s, serving dtype %s", device, serving_dtype
         )

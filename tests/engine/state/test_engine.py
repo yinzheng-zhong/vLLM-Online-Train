@@ -8,13 +8,24 @@ import pytest
 import torch
 from torch import nn
 
-from tests.conftest import CPU, HIDDEN, REMOTE, VOCAB, FakeTarget, placed
+from tests.conftest import (
+    CPU,
+    HIDDEN,
+    REMOTE,
+    VOCAB,
+    FakeMultiModalTarget,
+    FakeTarget,
+    placed,
+)
 from vllm_online_train.contracts.provider import StateProvider
 from vllm_online_train.engine.state.engine import EngineStateProvider
+from vllm_online_train.engine.state.target_locator import TargetLocator
 
 
 def provider(target: nn.Module | None = None) -> EngineStateProvider:
-    return EngineStateProvider(target or FakeTarget(), CPU, torch.bfloat16)
+    return EngineStateProvider(
+        TargetLocator(), target or FakeTarget(), CPU, torch.bfloat16
+    )
 
 
 def test_it_satisfies_the_contract():
@@ -23,7 +34,7 @@ def test_it_satisfies_the_contract():
 
 def test_it_reports_both_dtypes():
     target = FakeTarget()
-    subject = EngineStateProvider(target, CPU, torch.bfloat16)
+    subject = provider(target)
     assert subject.serving_dtype == torch.bfloat16
     assert subject.target_dtype == target.embed.weight.dtype
     assert subject.device == CPU
@@ -74,20 +85,37 @@ def test_teacher_logits_go_through_the_targets_own_projection():
 
 
 def test_teacher_logits_cast_to_the_target_dtype():
-    target = FakeTarget().to(torch.bfloat16)
-    subject = EngineStateProvider(target, CPU, torch.bfloat16)
+    subject = provider(FakeTarget().to(torch.bfloat16))
     logits = subject.teacher_logits(torch.randn(4, HIDDEN, dtype=torch.float32))
     assert logits.dtype == torch.float32
     assert torch.isfinite(logits).all()
 
 
+def test_a_multimodal_target_is_borrowed_from_through_its_language_model():
+    """A multimodal wrapper carries neither the embedding table nor the LM head: both
+    sit one level down, in the text stack it delegates generation to."""
+    target = FakeMultiModalTarget()
+    subject = provider(target)
+    hidden = torch.randn(3, HIDDEN)
+
+    assert subject.embedding_weight().shape == (VOCAB, HIDDEN)
+    assert subject.lm_head_weight().shape == (VOCAB, HIDDEN)
+    torch.testing.assert_close(
+        subject.teacher_logits(hidden),
+        target.language_model.lm_head(hidden),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
+
 def test_a_target_without_an_lm_head_is_refused():
     class NoHead(nn.Module):
-        def get_input_embeddings(self):
-            return nn.Embedding(VOCAB, HIDDEN)
+        def __init__(self):
+            super().__init__()
+            self.embed_tokens = nn.Embedding(VOCAB, HIDDEN)
 
-    with pytest.raises(ValueError, match="embedding table and LM head"):
-        EngineStateProvider(NoHead(), CPU, torch.bfloat16)
+    with pytest.raises(ValueError, match="LM head"):
+        provider(NoHead())
 
 
 def test_a_target_without_embeddings_is_refused():
@@ -96,11 +124,8 @@ def test_a_target_without_embeddings_is_refused():
             super().__init__()
             self.lm_head = nn.Linear(HIDDEN, VOCAB, bias=False)
 
-        def get_input_embeddings(self):
-            return None
-
-    with pytest.raises(ValueError, match="embedding table and LM head"):
-        EngineStateProvider(NoEmbed(), CPU, torch.bfloat16)
+    with pytest.raises(ValueError, match="embedding table"):
+        provider(NoEmbed())
 
 
 def test_the_objective_can_score_through_a_stub(head, batch, config):

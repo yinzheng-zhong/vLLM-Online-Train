@@ -19,6 +19,7 @@ from vllm_online_train.engine.capture.rollout_capture import RolloutCapture
 from vllm_online_train.engine.capture.valid_positions import ValidPositions
 from vllm_online_train.engine.state.engine import EngineStateProvider
 from vllm_online_train.engine.state.mirrored import MirroredStateProvider
+from vllm_online_train.engine.state.target_locator import TargetLocator
 from vllm_online_train.training.checkpoint.drafter_locator import DrafterLocator
 from vllm_online_train.training.checkpoint.exporter import CheckpointExporter
 from vllm_online_train.training.checkpoint.weight_names import WeightNameRewriter
@@ -68,6 +69,7 @@ class SessionAssembler:
         self.writer = CheckpointWriter(self.naming)
         self.publisher = WeightPublisher(self.naming, self.weights)
         self.locator = DrafterLocator()
+        self.target_locator = TargetLocator()
         self.positions = ValidPositions()
         self.blocks = BlockBuilder()
         self.divergence = KLDivergence()
@@ -98,7 +100,10 @@ class SessionAssembler:
 
         config = self.resolver.resolve(vllm_config, settings)
         engine = EngineStateProvider(
-            runner.get_model(), runner.device, vllm_config.model_config.dtype
+            self.target_locator,
+            runner.get_model(),
+            runner.device,
+            vllm_config.model_config.dtype,
         )
         provider = self.build_provider(config, engine)
         manager = self.build_manager(

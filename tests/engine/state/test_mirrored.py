@@ -33,12 +33,15 @@ from vllm_online_train.assembler import SessionAssembler
 from vllm_online_train.contracts.provider import StateProvider
 from vllm_online_train.engine.state.engine import EngineStateProvider
 from vllm_online_train.engine.state.mirrored import MirroredStateProvider
+from vllm_online_train.engine.state.target_locator import TargetLocator
 
 
 def engine_provider(
     target: FakeTarget | None = None, serving_dtype: torch.dtype = torch.float32
 ) -> EngineStateProvider:
-    return EngineStateProvider(target or FakeTarget(), CPU, serving_dtype)
+    return EngineStateProvider(
+        TargetLocator(), target or FakeTarget(), CPU, serving_dtype
+    )
 
 
 def mirror(
