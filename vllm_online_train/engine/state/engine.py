@@ -56,48 +56,63 @@ class EngineStateProvider:
         """The dtype the engine is configured to serve at."""
         return self._serving_dtype
 
-    def embedding_weight(self, device: torch.device | None = None) -> torch.Tensor:
-        """The target's input embedding table, detached in fp32.
+    def embedding_weight(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        """The target's input embedding table, detached.
 
         Args:
             device: Where to place the copy. `None` selects the target's device.
+            dtype: Precision to hold the copy at. `None` selects fp32.
 
         Returns:
-            `[vocab, hidden]` fp32.
+            `[vocab, hidden]` at `dtype`.
         """
-        return self._borrow(self._embed.weight, device)
+        return self._borrow(self._embed.weight, device, dtype)
 
-    def lm_head_weight(self, device: torch.device | None = None) -> torch.Tensor:
-        """The target's vocabulary projection, detached in fp32.
+    def lm_head_weight(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        """The target's vocabulary projection, detached.
 
         Args:
             device: Where to place the copy. `None` selects the target's device.
+            dtype: Precision to hold the copy at. `None` selects fp32.
 
         Returns:
-            `[vocab, hidden]` fp32.
+            `[vocab, hidden]` at `dtype`.
         """
-        return self._borrow(self._lm_head.weight, device)
+        return self._borrow(self._lm_head.weight, device, dtype)
 
     def _borrow(
-        self, weight: torch.Tensor, device: torch.device | None
+        self,
+        weight: torch.Tensor,
+        device: torch.device | None,
+        dtype: torch.dtype | None,
     ) -> torch.Tensor:
-        """Copy one of the target's parameters out, in fp32.
+        """Copy one of the target's parameters out.
 
-        Moves at the target's own dtype and upcasts on the destination. The result is
-        always a copy, never a view of the engine's own parameter.
+        The move and the cast are one step, so a vocabulary-sized parameter is never
+        materialised at an intermediate precision. The result is always a copy, never a
+        view of the engine's own parameter.
 
         Args:
             weight: The parameter to borrow.
             device: Destination. `None` selects the target's device.
+            dtype: Precision of the copy. `None` selects fp32.
 
         Returns:
-            A detached fp32 copy on `device`.
+            A detached copy on `device`, at `dtype`.
         """
-        moved = weight.detach().to(device or self._device)
-        if moved.dtype is not torch.float32:
-            return moved.float()
-        # Sharing storage with the parameter means the move was a no-op and the upcast
-        # would be too, so the copy has to be taken here.
+        moved = weight.detach().to(
+            device=device or self._device, dtype=dtype or torch.float32
+        )
+        # Sharing storage with the parameter means both the move and the cast were
+        # no-ops, so the copy has to be taken here.
         if moved.data_ptr() == weight.data_ptr():
             return moved.clone()
         return moved

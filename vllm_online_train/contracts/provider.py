@@ -27,19 +27,29 @@ class StateProvider(Protocol):
         """The dtype the engine is configured to serve at."""
         ...
 
-    def embedding_weight(self, device: torch.device | None = None) -> torch.Tensor:
+    def embedding_weight(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
         """The target's input embedding table, `[vocab, hidden]`, detached.
 
         Args:
             device: Where to place the copy. `None` selects `device`.
+            dtype: Precision to hold the copy at. `None` selects fp32.
         """
         ...
 
-    def lm_head_weight(self, device: torch.device | None = None) -> torch.Tensor:
+    def lm_head_weight(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
         """The target's vocabulary projection, `[vocab, hidden]`, detached.
 
         Args:
             device: Where to place the copy. `None` selects `device`.
+            dtype: Precision to hold the copy at. `None` selects fp32.
         """
         ...
 

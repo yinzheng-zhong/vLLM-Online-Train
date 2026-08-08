@@ -85,6 +85,32 @@ def test_the_projection_is_held_at_the_requested_dtype():
     assert logits.dtype == torch.float32
 
 
+def test_the_projection_is_borrowed_at_the_dtype_it_is_held_at(monkeypatch):
+    """Borrowing at fp32 and casting afterwards would put a second vocabulary-sized
+    copy on the training device."""
+    source = engine_provider()
+    asked: list[torch.dtype | None] = []
+    borrow = source.lm_head_weight
+
+    def recording(
+        device: torch.device | None = None, dtype: torch.dtype | None = None
+    ) -> torch.Tensor:
+        asked.append(dtype)
+        return borrow(device, dtype)
+
+    monkeypatch.setattr(source, "lm_head_weight", recording)
+    assert MirroredStateProvider(source, REMOTE, torch.bfloat16).projection_dtype == (
+        torch.bfloat16
+    )
+    assert asked == [torch.bfloat16]
+
+
+def test_a_borrow_through_the_mirror_carries_the_dtype():
+    subject = mirror()
+    assert subject.embedding_weight(dtype=torch.bfloat16).dtype == torch.bfloat16
+    assert subject.lm_head_weight(dtype=torch.bfloat16).dtype == torch.bfloat16
+
+
 def test_the_teacher_never_touches_the_engines_module():
     """The whole point: no matmul on the serving GPU and no `[N, vocab]` logits crossing
     the bus once training is under way."""

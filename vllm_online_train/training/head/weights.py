@@ -24,6 +24,28 @@ class HeadWeights:
         head.model.embed_tokens.weight.requires_grad_(False)
         head.lm_head.weight.requires_grad_(False)
 
+    def load_embedding(
+        self, head: TrainableDFlashHead, embed_tokens: torch.Tensor
+    ) -> None:
+        """Copy the target's embedding table in.
+
+        Args:
+            head: The head to load into.
+            embed_tokens: `[vocab, H]` embedding table.
+        """
+        with torch.no_grad():
+            head.model.embed_tokens.weight.copy_(embed_tokens)
+
+    def load_lm_head(self, head: TrainableDFlashHead, lm_head: torch.Tensor) -> None:
+        """Copy the target's vocabulary projection in.
+
+        Args:
+            head: The head to load into.
+            lm_head: `[vocab, H]` vocabulary projection.
+        """
+        with torch.no_grad():
+            head.lm_head.weight.copy_(lm_head)
+
     def load_shared(
         self,
         head: TrainableDFlashHead,
@@ -40,9 +62,8 @@ class HeadWeights:
             embed_tokens: `[vocab, H]` embedding table.
             lm_head: `[vocab, H]` vocabulary projection.
         """
-        with torch.no_grad():
-            head.model.embed_tokens.weight.copy_(embed_tokens)
-            head.lm_head.weight.copy_(lm_head)
+        self.load_embedding(head, embed_tokens)
+        self.load_lm_head(head, lm_head)
 
     def cast_shared(self, head: TrainableDFlashHead, dtype: torch.dtype) -> None:
         """Hold the borrowed embedding table and LM head at `dtype`.

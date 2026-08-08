@@ -28,7 +28,7 @@ class MirroredStateProvider:
         """
         self._source = source
         self._device = device
-        self._projection = source.lm_head_weight(device).to(dtype)
+        self._projection = source.lm_head_weight(device, dtype)
         logger.debug(
             "mirrored state provider built on %s at %s", device, self._projection.dtype
         )
@@ -53,27 +53,37 @@ class MirroredStateProvider:
         """The precision the mirrored vocabulary projection is held at."""
         return self._projection.dtype
 
-    def embedding_weight(self, device: torch.device | None = None) -> torch.Tensor:
-        """The target's input embedding table, detached in fp32.
+    def embedding_weight(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        """The target's input embedding table, detached.
 
         Args:
             device: Where to place the copy. `None` selects the training device.
+            dtype: Precision to hold the copy at. `None` selects fp32.
 
         Returns:
-            `[vocab, hidden]` fp32.
+            `[vocab, hidden]` at `dtype`.
         """
-        return self._source.embedding_weight(device or self._device)
+        return self._source.embedding_weight(device or self._device, dtype)
 
-    def lm_head_weight(self, device: torch.device | None = None) -> torch.Tensor:
-        """The target's vocabulary projection, detached in fp32.
+    def lm_head_weight(
+        self,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        """The target's vocabulary projection, detached.
 
         Args:
             device: Where to place the copy. `None` selects the training device.
+            dtype: Precision to hold the copy at. `None` selects fp32.
 
         Returns:
-            `[vocab, hidden]` fp32.
+            `[vocab, hidden]` at `dtype`.
         """
-        return self._source.lm_head_weight(device or self._device)
+        return self._source.lm_head_weight(device or self._device, dtype)
 
     def teacher_logits(self, hidden: torch.Tensor) -> torch.Tensor:
         """Project hidden states through the mirrored copy of the target's head.

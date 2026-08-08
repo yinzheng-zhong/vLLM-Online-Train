@@ -70,6 +70,23 @@ def test_borrowed_weights_can_be_asked_for_on_another_device():
     assert subject.lm_head_weight(REMOTE).device == placed(REMOTE)
 
 
+def test_a_borrow_comes_back_at_the_requested_dtype():
+    """The move and the cast are one step, so the copy is never materialised at fp32
+    on the way to a narrower dtype."""
+    target = FakeTarget().to(torch.bfloat16)
+    subject = provider(target)
+
+    embed = subject.embedding_weight(dtype=torch.bfloat16)
+    assert embed.dtype == torch.bfloat16
+    assert embed.shape == (VOCAB, HIDDEN)
+    assert embed.data_ptr() != target.embed.weight.data_ptr()
+
+    lm_head = subject.lm_head_weight(REMOTE, torch.bfloat16)
+    assert lm_head.dtype == torch.bfloat16
+    assert lm_head.device == placed(REMOTE)
+    assert lm_head.data_ptr() != target.lm_head.weight.data_ptr()
+
+
 def test_teacher_logits_go_through_the_targets_own_projection():
     """This is what makes an exact full-vocabulary teacher affordable: the buffer
     holds `[T, hidden]` and the `[T, vocab]` logits are regenerated here."""

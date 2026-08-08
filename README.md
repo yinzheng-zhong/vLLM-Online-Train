@@ -232,8 +232,9 @@ activations push it to roughly 8 GiB, so budget `(1 - util) × total ≥ ~8 GiB`
 
 On a second GPU that constraint goes away and **util ≤ 0.9** is reasonable, since what
 is left on the serving card is the capture's device-side gather and a hot publish. The
-training card wants ~9 GiB: 7.17 above plus activations, and a peak while the borrowed
-embedding table and LM head are held in fp32 on the way to their storage dtype.
+training card wants ~9 GiB: 7.17 above plus activations. The borrowed embedding table
+and LM head are copied in at their storage dtype, one at a time, so building the head
+adds one such tensor to the peak rather than holding four.
 
 Levers, in order of effect:
 

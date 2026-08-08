@@ -232,16 +232,16 @@ class SessionAssembler:
             provider: Supplies the embedding table and the LM head.
 
         Returns:
-            The head, on the provider's device, trained tensors at fp32.
+            The head, on the provider's device, trained tensors at fp32 and borrowed
+            tensors at the shared dtype.
         """
         arch = self.arch_factory.create(vllm_config, config.shapes)
-        head = self.head_factory.create(arch).to(
-            device=provider.device, dtype=torch.float32
-        )
-        self.weights.load_shared(
-            head, provider.embedding_weight(), provider.lm_head_weight()
-        )
-        self.weights.cast_shared(head, self.shared_dtype(config, provider))
+        shared = self.shared_dtype(config, provider)
+        head = self.head_factory.create(arch).to(dtype=torch.float32)
+        self.weights.cast_shared(head, shared)
+        head = head.to(device=provider.device)
+        self.weights.load_embedding(head, provider.embedding_weight(dtype=shared))
+        self.weights.load_lm_head(head, provider.lm_head_weight(dtype=shared))
         return head
 
     @staticmethod
