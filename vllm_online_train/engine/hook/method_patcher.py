@@ -2,9 +2,8 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from vllm.logger import init_logger
-
 from vllm_online_train.engine.hook.signature_guard import SignatureGuard
+from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 

@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 import torch
-from vllm.logger import init_logger
 
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.checkpoint.draft_config import DraftConfigBuilder
 from vllm_online_train.training.checkpoint.init_plan import (
     InitHeadPlanner,

@@ -1,6 +1,6 @@
 import torch
-from vllm.logger import init_logger
 
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.head.arch import DFlashHeadArch
 from vllm_online_train.training.head.block_masks import BlockMaskBuilder
 from vllm_online_train.training.head.trainable_head import TrainableDFlashHead

@@ -1,6 +1,5 @@
-from vllm.logger import init_logger
-
 from vllm_online_train.contracts.sink import MetricsSink
+from vllm_online_train.logger import init_logger
 from vllm_online_train.step import EngineStep
 from vllm_online_train.training.idle_gate import IdleGate
 from vllm_online_train.training.manager import OnlineTrainManager

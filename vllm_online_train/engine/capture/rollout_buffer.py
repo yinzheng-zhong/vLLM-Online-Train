@@ -1,5 +1,4 @@
 import torch
-from vllm.logger import init_logger
 
 from vllm_online_train.config.settings import BufferSettings
 from vllm_online_train.config.shapes import EngineShapes
@@ -9,6 +8,7 @@ from vllm_online_train.engine.capture.records import (
     PendingRollout,
     RolloutRecord,
 )
+from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 

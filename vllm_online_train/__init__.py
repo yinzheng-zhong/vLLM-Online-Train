@@ -30,11 +30,27 @@ VLLM_PLUGINS=online_train ONLINE_TRAIN_CONFIG=./train.json vllm serve ...
 See `README.md` for the operator guide and `CLAUDE.md` for the design notes.
 """
 
-from vllm.logger import init_logger
+import importlib.metadata
+import os
+
+from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 
-__all__ = ["register"]
+__all__ = ["register", "version"]
+
+
+def version() -> str:
+    """The installed package version.
+
+    Returns:
+        The version, or `"unknown"` when the package is imported from a source tree
+        it was never installed from.
+    """
+    try:
+        return importlib.metadata.version("vllm-online-train")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 def register() -> None:
@@ -45,6 +61,9 @@ def register() -> None:
     idempotent method wrapper and returns. No CUDA, no model, no config parsing, and
     no import of the training stack.
     """
+    from vllm_online_train.engine.hook.settings_loader import SettingsLoader
+
+    config = os.environ.get(SettingsLoader.CONFIG_ENV) or "<unset>"
     try:
         from vllm_online_train.engine.hook import capture_hook
 
@@ -52,6 +71,16 @@ def register() -> None:
     except Exception:
         # Swallowed: a failed install leaves the serving path untouched.
         logger.exception(
-            "vllm-online-train failed to install its capture hook; serving "
-            "continues without online training."
+            "vllm-online-train %s failed to install its capture hook; serving "
+            "continues without online training.",
+            version(),
         )
+        return
+    logger.info(
+        "vllm-online-train %s loaded: capture hook on "
+        "GPUModelRunner.propose_draft_token_ids, %s=%s. Training starts on the "
+        "first DFlash step, or logs why it cannot.",
+        version(),
+        SettingsLoader.CONFIG_ENV,
+        config,
+    )

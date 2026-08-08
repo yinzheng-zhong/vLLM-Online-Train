@@ -1,8 +1,7 @@
 import hashlib
 
-from vllm.logger import init_logger
-
 from vllm_online_train.config.settings import CaptureSettings
+from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 

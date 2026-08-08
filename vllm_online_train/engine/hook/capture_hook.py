@@ -1,12 +1,11 @@
 import json
 from typing import Any
 
-from vllm.logger import init_logger
-
 from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.engine.hook.capture_state import CaptureState
 from vllm_online_train.engine.hook.method_patcher import MethodPatcher
 from vllm_online_train.engine.hook.settings_loader import SettingsLoader
+from vllm_online_train.logger import init_logger
 from vllm_online_train.step import EngineStep
 
 logger = init_logger(__name__)

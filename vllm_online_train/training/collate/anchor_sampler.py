@@ -1,8 +1,7 @@
 import random
 
-from vllm.logger import init_logger
-
 from vllm_online_train.config.settings import AnchorSettings
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.collate.replay_batch import BlockRecord
 
 logger = init_logger(__name__)

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any, TextIO
 
-from vllm.logger import init_logger
+from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 

@@ -133,7 +133,9 @@ def test_register_does_not_import_the_training_stack():
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "[]", result.stdout
+    # `register()` logs its banner to the same stream, so only the last line is the
+    # script's own output.
+    assert result.stdout.strip().splitlines()[-1] == "[]", result.stdout
 
 
 def test_wrapper_keeps_the_signature_it_asserted():

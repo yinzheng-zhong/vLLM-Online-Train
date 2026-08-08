@@ -1,8 +1,7 @@
 from collections.abc import Callable
 
-from vllm.logger import init_logger
-
 from vllm_online_train.config.settings import OptimSettings
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.optim.cosine_warmup import CosineWithWarmup
 from vllm_online_train.training.optim.warmup_only import WarmupOnly
 

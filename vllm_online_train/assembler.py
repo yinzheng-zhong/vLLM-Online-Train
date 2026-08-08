@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from vllm.logger import init_logger
 
 from vllm_online_train.config.device_placement import DevicePlacement
 from vllm_online_train.config.resolver import ConfigResolver
@@ -20,6 +19,7 @@ from vllm_online_train.engine.capture.valid_positions import ValidPositions
 from vllm_online_train.engine.state.engine import EngineStateProvider
 from vllm_online_train.engine.state.mirrored import MirroredStateProvider
 from vllm_online_train.engine.state.target_locator import TargetLocator
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.checkpoint.drafter_locator import DrafterLocator
 from vllm_online_train.training.checkpoint.exporter import CheckpointExporter
 from vllm_online_train.training.checkpoint.weight_names import WeightNameRewriter

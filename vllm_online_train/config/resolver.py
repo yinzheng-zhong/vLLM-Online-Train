@@ -1,10 +1,10 @@
 from typing import TYPE_CHECKING
 
 import torch
-from vllm.logger import init_logger
 
 from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.config.shapes import EngineShapes, ResolvedConfig
+from vllm_online_train.logger import init_logger
 
 if TYPE_CHECKING:
     from vllm.config import SpeculativeConfig, VllmConfig

@@ -1,10 +1,9 @@
 import threading
 
-from vllm.logger import init_logger
-
 from vllm_online_train.config.settings import BookkeepingSettings, GateSettings
 from vllm_online_train.contracts.runner import StepRunner
 from vllm_online_train.contracts.sink import MetricsSink
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.idle_gate import IdleGate
 
 logger = init_logger(__name__)

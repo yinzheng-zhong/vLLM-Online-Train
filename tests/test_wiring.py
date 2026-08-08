@@ -47,10 +47,11 @@ def test_the_head_factory_and_publisher_share_a_weight_helper(assembler):
 )
 def test_the_settings_layer_stays_leaf_level(module):
     """`config/` and `contracts/` are what everything else depends on, so they may
-    only reach each other and `step.py`."""
+    only reach each other, `step.py` and `logger.py`."""
     allowed = (
         "vllm_online_train.config",
         "vllm_online_train.contracts",
+        "vllm_online_train.logger",
         "vllm_online_train.step",
     )
     spec = importlib.util.find_spec(module)

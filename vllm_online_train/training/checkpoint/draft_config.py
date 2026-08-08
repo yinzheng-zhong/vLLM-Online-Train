@@ -1,7 +1,6 @@
 from collections.abc import Iterable
 
-from vllm.logger import init_logger
-
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.head.arch import DFlashHeadArch
 
 logger = init_logger(__name__)

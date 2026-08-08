@@ -1,9 +1,8 @@
 import random
 
-from vllm.logger import init_logger
-
 from vllm_online_train.config.settings import BufferSettings
 from vllm_online_train.engine.capture.records import RolloutRecord
+from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 

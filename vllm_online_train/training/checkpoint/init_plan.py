@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from vllm.logger import init_logger
-
+from vllm_online_train.logger import init_logger
 from vllm_online_train.training.head.arch import ArchFactory, DFlashHeadArch
 from vllm_online_train.training.head.feature_layers import TargetLayerPlanner
 

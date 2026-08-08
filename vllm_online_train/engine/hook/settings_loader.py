@@ -1,10 +1,9 @@
 import json
 import os
 
-from vllm.logger import init_logger
-
 from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.config.settings_factory import SettingsFactory
+from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 
