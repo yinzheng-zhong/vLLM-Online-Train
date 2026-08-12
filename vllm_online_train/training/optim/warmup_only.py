@@ -13,15 +13,15 @@ class WarmupOnly:
         self.warmup_steps = warmup_steps
         logger.debug("WarmupOnly: warmup_steps=%d", warmup_steps)
 
-    def __call__(self, step: int) -> float:
+    def __call__(self, optimizer_step: int) -> float:
         """Compute the multiplier for one step.
 
         Args:
-            step: Optimizer step, zero-based.
+            optimizer_step: Optimizer step, zero-based.
 
         Returns:
-            `(step + 1) / warmup_steps` during warmup, then 1.0.
+            `(optimizer_step + 1) / warmup_steps` during warmup, then 1.0.
         """
-        if step >= self.warmup_steps:
+        if optimizer_step >= self.warmup_steps:
             return 1.0
-        return (step + 1) / max(1, self.warmup_steps)
+        return (optimizer_step + 1) / max(1, self.warmup_steps)

@@ -37,35 +37,36 @@ class SettingsFactory:
     TOP_LEVEL: frozenset[str] = frozenset({"enabled"})
     """Flat keys that belong to the aggregate rather than to any section."""
 
-    def field_owner(self, name: str) -> str | None:
+    def field_owner(self, field_name: str) -> str | None:
         """Name the section a flat key belongs to.
 
         Args:
-            name: A flat key, e.g. `"idle_ms"`.
+            field_name: A flat key, e.g. `"idle_ms"`.
 
         Returns:
             The section attribute name, `"enabled"` for the master switch, or `None`
             when no section declares the key.
         """
-        if name in self.TOP_LEVEL:
-            return name
-        for section, cls in self.SECTIONS.items():
-            if any(f.name == name for f in fields(cls)):
-                return section
+        if field_name in self.TOP_LEVEL:
+            return field_name
+        for section_name, section_cls in self.SECTIONS.items():
+            if any(field.name == field_name for field in fields(section_cls)):
+                return section_name
         return None
 
     def known_fields(self) -> frozenset[str]:
         """Every flat key any section accepts, plus the top-level keys."""
-        names = set(self.TOP_LEVEL)
-        for cls in self.SECTIONS.values():
-            names.update(f.name for f in fields(cls))
-        return frozenset(names)
+        field_names = set(self.TOP_LEVEL)
+        for section_cls in self.SECTIONS.values():
+            field_names.update(field.name for field in fields(section_cls))
+        return frozenset(field_names)
 
-    def create(self, values: dict[str, Any]) -> OnlineTrainSettings:
+    def create(self, field_values: dict[str, Any]) -> OnlineTrainSettings:
         """Route flat keys into their sections and build the aggregate.
 
         Args:
-            values: Flat field name to value, as read from `ONLINE_TRAIN_CONFIG`.
+            field_values: Flat field name to value, as read from
+                `ONLINE_TRAIN_CONFIG`.
 
         Returns:
             The frozen sectioned settings.
@@ -74,33 +75,36 @@ class SettingsFactory:
             ValueError: If a key belongs to no section. The message names the closest
                 accepted keys.
         """
-        routed: dict[str, dict[str, Any]] = {name: {} for name in self.SECTIONS}
-        top: dict[str, Any] = {}
-        unknown: list[str] = []
+        routed_values: dict[str, dict[str, Any]] = {
+            section_name: {} for section_name in self.SECTIONS
+        }
+        top_level_values: dict[str, Any] = {}
+        unknown_names: list[str] = []
 
-        for key, value in values.items():
-            owner = self.field_owner(key)
-            if owner is None:
-                unknown.append(key)
-            elif owner in self.TOP_LEVEL:
-                top[owner] = value
+        for field_name, value in field_values.items():
+            owner_name = self.field_owner(field_name)
+            if owner_name is None:
+                unknown_names.append(field_name)
+            elif owner_name in self.TOP_LEVEL:
+                top_level_values[owner_name] = value
             else:
-                routed[owner][key] = value
+                routed_values[owner_name][field_name] = value
 
-        if unknown:
-            accepted = ", ".join(sorted(self.known_fields()))
+        if unknown_names:
+            accepted_names = ", ".join(sorted(self.known_fields()))
             raise ValueError(
-                f"unknown online-train settings: {', '.join(sorted(unknown))}. "
-                f"Accepted fields are: {accepted}"
+                f"unknown online-train settings: {', '.join(sorted(unknown_names))}. "
+                f"Accepted fields are: {accepted_names}"
             )
 
         sections = {
-            name: cls(**routed[name]) for name, cls in self.SECTIONS.items()
+            section_name: section_cls(**routed_values[section_name])
+            for section_name, section_cls in self.SECTIONS.items()
         }
         logger.debug(
             "Routed %d online-train keys into %d sections (%d at top level)",
-            sum(len(fields_) for fields_ in routed.values()),
+            sum(len(values) for values in routed_values.values()),
             len(sections),
-            len(top),
+            len(top_level_values),
         )
-        return OnlineTrainSettings(**top, **sections)
+        return OnlineTrainSettings(**top_level_values, **sections)

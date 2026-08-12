@@ -9,7 +9,7 @@ logger = init_logger(__name__)
 
 class FeatureStager:
     def __init__(
-        self, shapes: EngineShapes, capacity: int, device: torch.device
+        self, engine_shapes: EngineShapes, capacity: int, device: torch.device
     ) -> None:
         """Gathers selected positions on the device and copies them to host memory.
 
@@ -20,33 +20,37 @@ class FeatureStager:
         tensors that already exist.
 
         Args:
-            shapes: Supplies the feature and hidden widths.
+            engine_shapes: Supplies the feature and hidden widths.
             capacity: Positions the staging buffer holds, i.e. `max_rollout_tokens`.
             device: Where the gather runs.
         """
-        self.shapes = shapes
+        self.engine_shapes = engine_shapes
         self.capacity = capacity
         self.device = device
 
-        width = shapes.feature_width + shapes.hidden_size
-        self._staging = torch.empty(
-            (capacity, width), dtype=shapes.feature_dtype, pin_memory=True
+        row_width = engine_shapes.feature_width + engine_shapes.hidden_size
+        self._staging_activations = torch.empty(
+            (capacity, row_width), dtype=engine_shapes.feature_dtype, pin_memory=True
         )
-        self._staging_tokens = torch.empty(
+        self._staging_token_ids = torch.empty(
             (capacity,), dtype=torch.int32, pin_memory=True
         )
-        self._index = torch.empty((capacity,), dtype=torch.int64, device=device)
-        self._index_host = torch.empty((capacity,), dtype=torch.int64, pin_memory=True)
+        self._gather_index = torch.empty(
+            (capacity,), dtype=torch.int64, device=device
+        )
+        self._gather_index_host = torch.empty(
+            (capacity,), dtype=torch.int64, pin_memory=True
+        )
 
         self._copy_stream = torch.cuda.Stream(device=device)
         self._copy_done = torch.cuda.Event()
-        self._slices: list[tuple[str, int, int]] = []
+        self._reservations: list[tuple[str, int, int]] = []
         self._staged = 0
         self._in_flight = False
         logger.debug(
-            "FeatureStager configured: capacity=%d, width=%d, device=%s",
+            "FeatureStager configured: capacity=%d, row_width=%d, device=%s",
             capacity,
-            width,
+            row_width,
             device,
         )
 
@@ -57,7 +61,7 @@ class FeatureStager:
 
     def reset(self) -> None:
         """Drop any reservations that were never committed."""
-        self._slices.clear()
+        self._reservations.clear()
         self._staged = 0
 
     def reserve(self, req_id: str, start: int, length: int) -> bool:
@@ -75,10 +79,10 @@ class FeatureStager:
         if self._staged + length > self.capacity:
             return False
         rows = slice(self._staged, self._staged + length)
-        self._index_host[rows] = torch.arange(
+        self._gather_index_host[rows] = torch.arange(
             start, start + length, dtype=torch.int64
         )
-        self._slices.append((req_id, self._staged, length))
+        self._reservations.append((req_id, self._staged, length))
         self._staged += length
         return True
 
@@ -99,26 +103,28 @@ class FeatureStager:
         if staged == 0:
             return
 
-        index = self._index[:staged]
-        index.copy_(self._index_host[:staged], non_blocking=True)
+        gather_index = self._gather_index[:staged]
+        gather_index.copy_(self._gather_index_host[:staged], non_blocking=True)
 
-        hidden_size = self.shapes.hidden_size
+        hidden_size = self.engine_shapes.hidden_size
         # Ordered against the default stream, so the gather cannot read activations
         # before the forward that produced them has retired.
         self._copy_stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self._copy_stream):
-            for i, aux in enumerate(aux_hidden_states):
-                column = slice(i * hidden_size, (i + 1) * hidden_size)
-                self._staging[:staged, column].copy_(
-                    aux.index_select(0, index), non_blocking=True
+            for layer_index, aux_layer in enumerate(aux_hidden_states):
+                column = slice(
+                    layer_index * hidden_size, (layer_index + 1) * hidden_size
                 )
-            width = self.shapes.feature_width
-            tail = slice(width, width + hidden_size)
-            self._staging[:staged, tail].copy_(
-                hidden_states.index_select(0, index), non_blocking=True
+                self._staging_activations[:staged, column].copy_(
+                    aux_layer.index_select(0, gather_index), non_blocking=True
+                )
+            feature_width = self.engine_shapes.feature_width
+            tail = slice(feature_width, feature_width + hidden_size)
+            self._staging_activations[:staged, tail].copy_(
+                hidden_states.index_select(0, gather_index), non_blocking=True
             )
-            self._staging_tokens[:staged].copy_(
-                input_ids.index_select(0, index), non_blocking=True
+            self._staging_token_ids[:staged].copy_(
+                input_ids.index_select(0, gather_index), non_blocking=True
             )
             self._copy_done.record(self._copy_stream)
         self._in_flight = True
@@ -136,15 +142,19 @@ class FeatureStager:
         self._copy_done.synchronize()
         self._in_flight = False
 
-        width = self.shapes.feature_width
-        chunks = [
+        feature_width = self.engine_shapes.feature_width
+        captured_chunks = [
             CapturedChunk(
                 req_id=req_id,
-                token_ids=self._staging_tokens[start : start + length].clone(),
-                features=self._staging[start : start + length, :width].clone(),
-                final_hidden=self._staging[start : start + length, width:].clone(),
+                token_ids=self._staging_token_ids[start : start + length].clone(),
+                features=self._staging_activations[
+                    start : start + length, :feature_width
+                ].clone(),
+                final_hidden=self._staging_activations[
+                    start : start + length, feature_width:
+                ].clone(),
             )
-            for req_id, start, length in self._slices
+            for req_id, start, length in self._reservations
         ]
         self.reset()
-        return chunks
+        return captured_chunks

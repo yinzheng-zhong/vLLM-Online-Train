@@ -13,7 +13,10 @@ logger = init_logger(__name__)
 
 class CheckpointExporter:
     def __init__(
-        self, writer: CheckpointWriter, weights: HeadWeights, source_dir: Path
+        self,
+        checkpoint_writer: CheckpointWriter,
+        head_weights: HeadWeights,
+        source_dir: Path,
     ) -> None:
         """Writes a head to a directory a restarted engine can serve directly.
 
@@ -21,53 +24,56 @@ class CheckpointExporter:
         verbatim copy of the `config.json` the engine is already running.
 
         Args:
-            writer: Writes the safetensors file and the config.
-            weights: Exports the head's parameter tree.
+            checkpoint_writer: Writes the safetensors file and the config.
+            head_weights: Exports the head's parameter tree.
             source_dir: The served head's directory, whose `config.json` is copied.
         """
-        self.writer = writer
-        self.weights = weights
+        self.checkpoint_writer = checkpoint_writer
+        self.head_weights = head_weights
         self.source_dir = source_dir
 
     def export(
         self,
-        head: TrainableDFlashHead,
+        draft_head: TrainableDFlashHead,
         directory: str | Path,
         dtype: torch.dtype,
     ) -> str:
         """Write one checkpoint.
 
         Args:
-            head: The head to export.
+            draft_head: The head to export.
             directory: Destination; created if absent.
             dtype: Cast before writing.
 
         Returns:
             The path of the written safetensors file.
         """
-        path = Path(directory)
-        path.mkdir(parents=True, exist_ok=True)
-        self._copy_source_config(path)
-        written = self.writer.write(
-            path, self.weights.export(head), head.arch, dtype=dtype
+        checkpoint_dir = Path(directory)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self._copy_source_config(checkpoint_dir)
+        written = self.checkpoint_writer.write(
+            checkpoint_dir,
+            self.head_weights.export(draft_head),
+            draft_head.head_arch,
+            dtype=dtype,
         )
         return str(written)
 
-    def _copy_source_config(self, path: Path) -> None:
+    def _copy_source_config(self, checkpoint_dir: Path) -> None:
         """Copy the served head's `config.json` beside the exported weights.
 
         Args:
-            path: The checkpoint directory.
+            checkpoint_dir: The checkpoint directory.
         """
-        filename = self.writer.CONFIG_FILENAME
-        source_config = self.source_dir / filename
+        config_filename = self.checkpoint_writer.CONFIG_FILENAME
+        source_config = self.source_dir / config_filename
         if source_config.is_file():
-            shutil.copyfile(source_config, path / filename)
+            shutil.copyfile(source_config, checkpoint_dir / config_filename)
         else:
             logger.warning(
                 "No %s beside the served head at %s; the exported checkpoint at %s "
                 "will need one copied in before it can be served.",
-                filename,
+                config_filename,
                 self.source_dir,
-                path,
+                checkpoint_dir,
             )

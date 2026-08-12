@@ -36,7 +36,7 @@ class InitHeadPlan:
     """A fresh head's resolved shape, the layers it reads, and where they came
     from."""
 
-    arch: DFlashHeadArch
+    head_arch: DFlashHeadArch
     target_layer_ids: list[int]
     """DFlash-numbered feature layers. vLLM adds 1 to reach its aux numbering."""
 
@@ -47,21 +47,23 @@ class InitHeadPlan:
 
 
 class InitHeadPlanner:
-    def __init__(self, planner: TargetLayerPlanner, arch_factory: ArchFactory) -> None:
+    def __init__(
+        self, target_layer_planner: TargetLayerPlanner, arch_factory: ArchFactory
+    ) -> None:
         """Resolves a fresh head's shape from a target config plus overrides.
 
         Args:
-            planner: Places the feature layers when none are given.
+            target_layer_planner: Places the feature layers when none are given.
             arch_factory: Supplies the RoPE base fallback.
         """
-        self.planner = planner
+        self.target_layer_planner = target_layer_planner
         self.arch_factory = arch_factory
 
-    def plan(self, request: InitHeadRequest) -> InitHeadPlan:
+    def plan(self, init_head_request: InitHeadRequest) -> InitHeadPlan:
         """Read the target config and resolve every width.
 
         Args:
-            request: The operator's choices.
+            init_head_request: The operator's choices.
 
         Returns:
             The plan, ready for `HeadFactory.create` and `DraftConfigBuilder.build`.
@@ -70,44 +72,52 @@ class InitHeadPlanner:
             ValueError: If the feature layers reach past the target's depth, or the
                 target has no spare embedding row for a mask token.
         """
-        target = self.load_target_config(request.target)
+        target_config = self.load_target_config(init_head_request.target)
 
-        hidden_size = request.hidden_size or int(target.hidden_size)
-        num_heads = request.num_heads or int(target.num_attention_heads)
-        head_dim = request.head_dim or int(
-            getattr(target, "head_dim", None) or hidden_size // num_heads
+        hidden_size = init_head_request.hidden_size or int(target_config.hidden_size)
+        num_heads = init_head_request.num_heads or int(
+            target_config.num_attention_heads
         )
-        vocab_size = int(target.vocab_size)
-        num_target_layers = int(target.num_hidden_layers)
+        head_dim = init_head_request.head_dim or int(
+            getattr(target_config, "head_dim", None) or hidden_size // num_heads
+        )
+        vocab_size = int(target_config.vocab_size)
+        num_target_layers = int(target_config.num_hidden_layers)
 
-        target_layer_ids = request.target_layer_ids or self.planner.plan(
-            num_target_layers, request.features
+        target_layer_ids = (
+            init_head_request.target_layer_ids
+            or self.target_layer_planner.plan(
+                num_target_layers, init_head_request.features
+            )
         )
         self._check_reach(target_layer_ids, num_target_layers)
 
-        mask_token_id = request.mask_token_id
+        mask_token_id = init_head_request.mask_token_id
         if mask_token_id is None:
-            mask_token_id = self.resolve_mask_token_id(request.target, vocab_size)
+            mask_token_id = self.resolve_mask_token_id(
+                init_head_request.target, vocab_size
+            )
 
-        arch = DFlashHeadArch(
-            num_layers=request.layers,
+        head_arch = DFlashHeadArch(
+            num_layers=init_head_request.layers,
             hidden_size=hidden_size,
-            intermediate_size=request.intermediate_size
-            or int(target.intermediate_size),
+            intermediate_size=init_head_request.intermediate_size
+            or int(target_config.intermediate_size),
             num_heads=num_heads,
-            num_kv_heads=request.num_kv_heads
-            or int(getattr(target, "num_key_value_heads", num_heads)),
+            num_kv_heads=init_head_request.num_kv_heads
+            or int(getattr(target_config, "num_key_value_heads", num_heads)),
             head_dim=head_dim,
             num_features=len(target_layer_ids),
-            block_size=request.block_size,
+            block_size=init_head_request.block_size,
             vocab_size=vocab_size,
             draft_vocab_size=vocab_size,
             mask_token_id=mask_token_id,
-            rms_norm_eps=float(getattr(target, "rms_norm_eps", 1e-6)),
+            rms_norm_eps=float(getattr(target_config, "rms_norm_eps", 1e-6)),
             rope_theta=float(
-                request.rope_theta or self.arch_factory.rope_theta(target)
+                init_head_request.rope_theta
+                or self.arch_factory.rope_theta(target_config)
             ),
-            attention_bias=bool(getattr(target, "attention_bias", False)),
+            attention_bias=bool(getattr(target_config, "attention_bias", False)),
         )
         logger.debug(
             "Resolved head plan: hidden_size=%d, num_heads=%d, "
@@ -118,10 +128,10 @@ class InitHeadPlanner:
             mask_token_id,
         )
         return InitHeadPlan(
-            arch=arch,
+            head_arch=head_arch,
             target_layer_ids=list(target_layer_ids),
             num_target_layers=num_target_layers,
-            target_config=target,
+            target_config=target_config,
         )
 
     @staticmethod
@@ -136,10 +146,10 @@ class InitHeadPlanner:
         """
         from transformers import AutoConfig
 
-        config = AutoConfig.from_pretrained(target)
-        if hasattr(config, "text_config"):
-            return config.text_config
-        return config
+        target_config = AutoConfig.from_pretrained(target)
+        if hasattr(target_config, "text_config"):
+            return target_config.text_config
+        return target_config
 
     @staticmethod
     def resolve_mask_token_id(target: str, vocab_size: int) -> int:

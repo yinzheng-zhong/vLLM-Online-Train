@@ -9,14 +9,14 @@ class KLDivergence:
         self,
         student_logits: torch.Tensor,
         teacher_logits: torch.Tensor,
-        direction: str,
+        kl_direction: str,
     ) -> torch.Tensor:
         """Per-row KL, accumulated in fp32.
 
         Args:
             student_logits: `[N, vocab]` draft logits.
             teacher_logits: `[N, vocab]` target logits.
-            direction: `"forward"` for `KL(p || q)` with `p` the teacher, anything
+            kl_direction: `"forward"` for `KL(p || q)` with `p` the teacher, anything
                 else for `KL(q || p)`.
 
         Returns:
@@ -24,6 +24,6 @@ class KLDivergence:
         """
         log_q = F.log_softmax(student_logits.float(), dim=-1)
         log_p = F.log_softmax(teacher_logits.float(), dim=-1)
-        if direction == "forward":
+        if kl_direction == "forward":
             return (log_p.exp() * (log_p - log_q)).sum(-1)
         return (log_q.exp() * (log_q - log_p)).sum(-1)

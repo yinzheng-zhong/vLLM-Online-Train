@@ -7,7 +7,7 @@ import pytest
 from tests.instances import REPO_ROOT
 from vllm_online_train.engine.hook import capture_hook
 
-settings_loader = capture_hook.loader
+settings_loader = capture_hook.settings_loader
 
 CONFIG_ENV = settings_loader.CONFIG_ENV
 
@@ -24,25 +24,25 @@ def test_an_empty_value_is_treated_as_unset(monkeypatch):
 
 def test_reads_inline_json(monkeypatch):
     monkeypatch.setenv(CONFIG_ENV, json.dumps({"anchors_per_sequence": 7}))
-    settings = settings_loader.load()
-    assert settings.anchors.anchors_per_sequence == 7
+    online_train_settings = settings_loader.load()
+    assert online_train_settings.anchors.anchors_per_sequence == 7
     # Pointing the variable at a config is itself the opt-in.
-    assert settings.enabled
+    assert online_train_settings.enabled
 
 
 def test_reads_a_file(tmp_path, monkeypatch):
     path = tmp_path / "train.json"
     path.write_text(json.dumps({"sequences_per_step": 3, "idle_ms": 25}))
     monkeypatch.setenv(CONFIG_ENV, str(path))
-    settings = settings_loader.load()
-    assert settings.anchors.sequences_per_step == 3
-    assert settings.gate.idle_ms == 25
+    online_train_settings = settings_loader.load()
+    assert online_train_settings.anchors.sequences_per_step == 3
+    assert online_train_settings.gate.idle_ms == 25
 
 
 def test_an_explicit_source_overrides_the_environment(monkeypatch):
     monkeypatch.setenv(CONFIG_ENV, json.dumps({"idle_ms": 1}))
-    settings = settings_loader.load(json.dumps({"idle_ms": 99}))
-    assert settings.gate.idle_ms == 99
+    online_train_settings = settings_loader.load(json.dumps({"idle_ms": 99}))
+    assert online_train_settings.gate.idle_ms == 99
 
 
 def test_enabled_false_survives(monkeypatch):
@@ -57,10 +57,10 @@ def test_the_shipped_template_loads(monkeypatch):
     if not template.is_file():
         pytest.skip("template not present")
     monkeypatch.setenv(CONFIG_ENV, str(template))
-    settings = settings_loader.load()
-    assert settings.enabled
-    assert settings.objective.kl_chunk_size == 128
-    assert settings.publish.publish_mode == "off"
+    online_train_settings = settings_loader.load()
+    assert online_train_settings.enabled
+    assert online_train_settings.objective.kl_chunk_size == 128
+    assert online_train_settings.publish.publish_mode == "off"
 
 
 def test_annotation_keys_are_ignored(monkeypatch):

@@ -15,7 +15,7 @@ class CheckpointWriter:
     CONFIG_FILENAME = "config.json"
     WEIGHTS_FILENAME = "model.safetensors"
 
-    def __init__(self, naming: WeightNameRewriter) -> None:
+    def __init__(self, weight_name_rewriter: WeightNameRewriter) -> None:
         """Writes a DFlash draft directory in the on-disk format.
 
         `embed_tokens` and `lm_head` are deliberately omitted: when a DFlash checkpoint
@@ -23,15 +23,15 @@ class CheckpointWriter:
         is the sharing the objective assumes.
 
         Args:
-            naming: Un-fuses the head's parameters into on-disk naming.
+            weight_name_rewriter: Un-fuses the head's parameters into on-disk naming.
         """
-        self.naming = naming
+        self.weight_name_rewriter = weight_name_rewriter
 
     def write(
         self,
         directory: str | Path,
         named_tensors: Iterable[tuple[str, torch.Tensor]],
-        arch: DFlashHeadArch,
+        head_arch: DFlashHeadArch,
         *,
         config: dict | None = None,
         dtype: torch.dtype | None = None,
@@ -41,7 +41,7 @@ class CheckpointWriter:
         Args:
             directory: Destination; created if absent.
             named_tensors: Fused-naming pairs, i.e. `HeadWeights.export()`.
-            arch: Supplies the split points for un-fusing.
+            head_arch: Supplies the split points for un-fusing.
             config: `config.json` contents. Omit to refresh only the weights.
             dtype: Cast before writing. `None` keeps the head's dtype.
 
@@ -50,22 +50,24 @@ class CheckpointWriter:
         """
         from safetensors.torch import save_file
 
-        path = Path(directory)
-        path.mkdir(parents=True, exist_ok=True)
+        checkpoint_dir = Path(directory)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         tensors: dict[str, torch.Tensor] = {}
-        for name, tensor in self.naming.rewrite(named_tensors, arch):
+        for name, tensor in self.weight_name_rewriter.rewrite(
+            named_tensors, head_arch
+        ):
             tensor = tensor.detach().to("cpu")
             if dtype is not None:
                 tensor = tensor.to(dtype)
             tensors[name] = tensor.contiguous()
 
         if config is not None:
-            (path / self.CONFIG_FILENAME).write_text(
+            (checkpoint_dir / self.CONFIG_FILENAME).write_text(
                 json.dumps(config, indent=2) + "\n"
             )
 
-        weights_path = path / self.WEIGHTS_FILENAME
+        weights_path = checkpoint_dir / self.WEIGHTS_FILENAME
         save_file(tensors, str(weights_path))
         logger.info("Wrote %d draft tensors to %s", len(tensors), weights_path)
         return weights_path

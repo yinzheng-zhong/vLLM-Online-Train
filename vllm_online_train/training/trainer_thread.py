@@ -12,11 +12,11 @@ logger = init_logger(__name__)
 class TrainerThread:
     def __init__(
         self,
-        gate: IdleGate,
-        runner: StepRunner,
-        settings: GateSettings,
-        bookkeeping: BookkeepingSettings,
-        sink: MetricsSink,
+        idle_gate: IdleGate,
+        step_runner: StepRunner,
+        gate_settings: GateSettings,
+        bookkeeping_settings: BookkeepingSettings,
+        metrics_sink: MetricsSink,
     ) -> None:
         """Polls the gate and runs training micro-batches while it is open.
 
@@ -24,17 +24,17 @@ class TrainerThread:
         ends it: micro-batch duration is the latency quantum, not the poll interval.
 
         Args:
-            gate: Decides when training may hold the GPU.
-            runner: Runs one micro-step and reports counters.
-            settings: Poll interval and the per-opening cap.
-            bookkeeping: Supplies the logging cadence.
-            sink: Receives the metric records.
+            idle_gate: Decides when training may hold the GPU.
+            step_runner: Runs one micro-step and reports counters.
+            gate_settings: Poll interval and the per-opening cap.
+            bookkeeping_settings: Supplies the logging cadence.
+            metrics_sink: Receives the metric records.
         """
-        self.gate = gate
-        self.runner = runner
-        self.settings = settings
-        self.bookkeeping = bookkeeping
-        self.sink = sink
+        self.idle_gate = idle_gate
+        self.step_runner = step_runner
+        self.gate_settings = gate_settings
+        self.bookkeeping_settings = bookkeeping_settings
+        self.metrics_sink = metrics_sink
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.micro_steps = 0
@@ -52,9 +52,9 @@ class TrainerThread:
         logger.info(
             "Online trainer thread started (idle_ms=%.0f, poll_ms=%.0f, "
             "busy_tokens=%d)",
-            self.settings.idle_ms,
-            self.settings.poll_ms,
-            self.settings.busy_tokens,
+            self.gate_settings.idle_ms,
+            self.gate_settings.poll_ms,
+            self.gate_settings.busy_tokens,
         )
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -71,31 +71,34 @@ class TrainerThread:
 
     def _run(self) -> None:
         """Poll the gate, training in bursts while it stays open."""
-        poll = self.settings.poll_seconds
-        cap = self.settings.max_micro_steps_per_gate
+        poll_seconds = self.gate_settings.poll_seconds
+        micro_step_cap = self.gate_settings.max_micro_steps_per_gate
         while not self._stop.is_set():
-            if not self.gate.is_open():
-                self.gate.mark_closed()
-                self._stop.wait(poll)
+            if not self.idle_gate.is_open():
+                self.idle_gate.mark_closed()
+                self._stop.wait(poll_seconds)
                 continue
 
-            self.gate.mark_opened()
-            in_this_opening = 0
+            self.idle_gate.mark_opened()
+            micro_steps_this_opening = 0
             starved = False
             while (
                 not self._stop.is_set()
-                and self.gate.is_open()
-                and (cap == 0 or in_this_opening < cap)
+                and self.idle_gate.is_open()
+                and (
+                    micro_step_cap == 0
+                    or micro_steps_this_opening < micro_step_cap
+                )
             ):
                 if not self._train_once():
                     starved = True
                     break
-                in_this_opening += 1
-            self.gate.mark_closed()
-            if starved or in_this_opening == 0:
+                micro_steps_this_opening += 1
+            self.idle_gate.mark_closed()
+            if starved or micro_steps_this_opening == 0:
                 # Backs off rather than reopening immediately, which would busy-loop
                 # on an idle engine with an empty buffer.
-                self._stop.wait(poll)
+                self._stop.wait(poll_seconds)
 
     def _train_once(self) -> bool:
         """Run one micro-batch.
@@ -104,21 +107,21 @@ class TrainerThread:
             False when there was nothing to train on or the step raised.
         """
         try:
-            metrics = self.runner.train_step()
+            metrics = self.step_runner.train_step()
         except Exception:
             self.errors += 1
             logger.exception(
                 "Online training step failed (%d so far); pausing this gate opening.",
                 self.errors,
             )
-            self.sink.write("train_error", {"errors": float(self.errors)})
+            self.metrics_sink.write("train_error", {"errors": float(self.errors)})
             return False
 
         if metrics is None:
             return False
 
         self.micro_steps += 1
-        log_every = self.bookkeeping.log_every
+        log_every = self.bookkeeping_settings.log_every
         if log_every and self.micro_steps % log_every == 0:
             self._log(metrics)
         return True
@@ -129,14 +132,14 @@ class TrainerThread:
         Args:
             metrics: This micro-step's metrics.
         """
-        record = dict(metrics)
-        record.update(self.gate.as_metrics())
-        record.update(self.runner.metrics())
-        self.sink.write("train", record)
+        combined_record = dict(metrics)
+        combined_record.update(self.idle_gate.as_metrics())
+        combined_record.update(self.step_runner.metrics())
+        self.metrics_sink.write("train", combined_record)
         logger.info(
             "Online training step %d: loss %.4f, top1 %.3f, gate open %.1f%%",
             int(metrics.get("step", 0)),
             metrics.get("loss/total", float("nan")),
             metrics.get("train/top1_agree", float("nan")),
-            100.0 * record.get("gate/open_fraction", 0.0),
+            100.0 * combined_record.get("gate/open_fraction", 0.0),
         )

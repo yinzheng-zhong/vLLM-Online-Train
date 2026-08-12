@@ -9,19 +9,20 @@ logger = init_logger(__name__)
 
 
 class MethodPatcher:
-    def __init__(self, guard: SignatureGuard) -> None:
+    def __init__(self, signature_guard: SignatureGuard) -> None:
         """Owns the wrapping and unwrapping of `propose_draft_token_ids`.
 
         Idempotent and reversible: `register()` runs in several vLLM processes, and
         patching a class in one that never builds a runner is inert.
 
         Args:
-            guard: Checks the method's signature against the pin before wrapping.
+            signature_guard: Checks the method's signature against the pin before
+                wrapping.
         """
-        self.guard = guard
+        self.signature_guard = signature_guard
         self._lock = threading.Lock()
         self._installed = False
-        self._original: Any = None
+        self._original_method: Any = None
 
     @property
     def installed(self) -> bool:
@@ -32,7 +33,7 @@ class MethodPatcher:
         """Wrap the runner method so `observe` runs before it.
 
         Args:
-            observe: Called with `(runner, scheduler_output, sampled_token_ids,
+            observe: Called with `(model_runner, scheduler_output, sampled_token_ids,
                 hidden_states, aux_hidden_states, spec_decode_metadata)`.
 
         Returns:
@@ -49,20 +50,22 @@ class MethodPatcher:
             # whichever order vLLM reached this from.
             from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-            # Read off the class, so `original` is a plain function whose first
+            # Read off the class, so `original_method` is a plain function whose first
             # positional parameter is `self`.
-            original = GPUModelRunner.propose_draft_token_ids
+            original_method = GPUModelRunner.propose_draft_token_ids
             # Raises before the class attribute below is reassigned.
-            self.guard.check(original)
+            self.signature_guard.check(original_method)
             # Rebinds one entry in the class dict. Every instance, already built
             # or not, resolves the name to the replacement from here on.
-            GPUModelRunner.propose_draft_token_ids = self._wrap(original, observe)
+            GPUModelRunner.propose_draft_token_ids = self._wrap(
+                original_method, observe
+            )
             # The only remaining reference to vLLM's function.
-            self._original = original
+            self._original_method = original_method
             self._installed = True
             logger.debug(
                 "Online training capture hook installed (pin %s)",
-                self.guard.PINNED_COMMIT,
+                self.signature_guard.PINNED_COMMIT,
             )
             return True
 
@@ -74,17 +77,17 @@ class MethodPatcher:
             from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
             # Rebinds the class dict entry back to vLLM's function.
-            GPUModelRunner.propose_draft_token_ids = self._original
-            self._original = None
+            GPUModelRunner.propose_draft_token_ids = self._original_method
+            self._original_method = None
             self._installed = False
             logger.debug("Online training capture hook uninstalled")
 
     @staticmethod
-    def _wrap(original: Any, observe: Callable[..., None]) -> Any:
+    def _wrap(original_method: Any, observe: Callable[..., None]) -> Any:
         """Build the replacement method.
 
         Args:
-            original: The unbound method being wrapped.
+            original_method: The unbound method being wrapped.
             observe: Runs before the delegation, while `sampled_token_ids` still
                 carries its `-1` rejection mask.
 
@@ -117,7 +120,7 @@ class MethodPatcher:
             )
             # Delegates with every argument unchanged and returns the result
             # verbatim, so the serving path sees no difference.
-            return original(
+            return original_method(
                 self,
                 scheduler_output,
                 sampled_token_ids,
@@ -131,6 +134,6 @@ class MethodPatcher:
             )
 
         # Standard-library convention: makes `inspect.signature` and
-        # `inspect.unwrap` resolve through the replacement to `original`.
-        propose_draft_token_ids.__wrapped__ = original
+        # `inspect.unwrap` resolve through the replacement to `original_method`.
+        propose_draft_token_ids.__wrapped__ = original_method
         return propose_draft_token_ids

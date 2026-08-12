@@ -40,24 +40,23 @@ class FakeInner(nn.Module):
 class FakeDrafter:
     """Stands in for `DFlashQwen3ForCausalLM`."""
 
-    def __init__(self, inner: FakeInner) -> None:
-        self.model = inner
-        self.loaded: list[str] = []
+    def __init__(self, inner_model: FakeInner) -> None:
+        self.model = inner_model
+        self.loaded_names: list[str] = []
 
-    def load_weights(self, weights) -> None:
-        self.loaded = [name for name, _ in weights]
+    def load_weights(self, named_tensors) -> None:
+        self.loaded_names = [name for name, _ in named_tensors]
         self.model.rebuild()
 
 
 def test_locator_finds_a_drafter_that_can_load_weights():
-    inner = FakeInner()
-    drafter = FakeDrafter(inner)
-    runner = SimpleNamespace(drafter=SimpleNamespace(model=drafter))
-    assert drafter_locator.find(runner) is drafter
+    drafter_model = FakeDrafter(FakeInner())
+    model_runner = SimpleNamespace(drafter=SimpleNamespace(model=drafter_model))
+    assert drafter_locator.find(model_runner) is drafter_model
 
 
 @pytest.mark.parametrize(
-    "runner",
+    "model_runner",
     [
         SimpleNamespace(),
         SimpleNamespace(drafter=None),
@@ -65,61 +64,63 @@ def test_locator_finds_a_drafter_that_can_load_weights():
         SimpleNamespace(drafter=SimpleNamespace(model=object())),
     ],
 )
-def test_locator_returns_none_without_a_loadable_drafter(runner):
-    assert drafter_locator.find(runner) is None
+def test_locator_returns_none_without_a_loadable_drafter(model_runner):
+    assert drafter_locator.find(model_runner) is None
 
 
 def test_publish_sends_split_names_in_the_serving_dtype():
-    arch = make_arch()
-    head = head_factory.create(arch)
-    drafter = FakeDrafter(FakeInner())
-    weight_publisher.publish(drafter, head, arch)
+    head_arch = make_arch()
+    draft_head = head_factory.create(head_arch)
+    drafter_model = FakeDrafter(FakeInner())
+    weight_publisher.publish(drafter_model, draft_head, head_arch)
 
-    assert drafter.loaded, "nothing was published"
-    assert any("q_proj" in name for name in drafter.loaded)
-    assert not any("qkv_proj" in name for name in drafter.loaded)
-    assert not any("lm_head" in name for name in drafter.loaded)
+    assert drafter_model.loaded_names, "nothing was published"
+    assert any("q_proj" in name for name in drafter_model.loaded_names)
+    assert not any("qkv_proj" in name for name in drafter_model.loaded_names)
+    assert not any("lm_head" in name for name in drafter_model.loaded_names)
 
 
 def test_publish_restores_derived_buffer_addresses():
     """A captured CUDA graph holds the old pointer, so the rebuilt values have to be
     copied back into the original storage rather than left at a new address."""
-    arch = make_arch()
-    head = head_factory.create(arch)
-    inner = FakeInner()
-    drafter = FakeDrafter(inner)
+    head_arch = make_arch()
+    draft_head = head_factory.create(head_arch)
+    inner_model = FakeInner()
+    drafter_model = FakeDrafter(inner_model)
 
-    before = inner._fused_kv_weight
-    weight_publisher.publish(drafter, head, arch)
+    before = inner_model._fused_kv_weight
+    weight_publisher.publish(drafter_model, draft_head, head_arch)
 
-    assert inner._fused_kv_weight is before, "address was not restored"
-    assert bool((inner._fused_kv_weight == 1).all()), "values were not updated"
+    assert inner_model._fused_kv_weight is before, "address was not restored"
+    assert bool((inner_model._fused_kv_weight == 1).all()), (
+        "values were not updated"
+    )
 
 
 def test_publish_leaves_in_place_aliases_alone():
     """A buffer that is an alias of a parameter is written in place by the load, so
     there is nothing to restore."""
-    arch = make_arch()
-    head = head_factory.create(arch)
-    inner = FakeInner(rebuild_at_new_address=False)
-    drafter = FakeDrafter(inner)
-    before = inner._fused_kv_weight
-    weight_publisher.publish(drafter, head, arch)
-    assert inner._fused_kv_weight is before
+    head_arch = make_arch()
+    draft_head = head_factory.create(head_arch)
+    inner_model = FakeInner(rebuild_at_new_address=False)
+    drafter_model = FakeDrafter(inner_model)
+    before = inner_model._fused_kv_weight
+    weight_publisher.publish(drafter_model, draft_head, head_arch)
+    assert inner_model._fused_kv_weight is before
 
 
 def test_publish_rejects_a_buffer_that_changed_shape():
     """A shape change means the head and the serving module have diverged
     structurally, and a hot publish can no longer be trusted."""
-    arch = make_arch()
-    head = head_factory.create(arch)
+    head_arch = make_arch()
+    draft_head = head_factory.create(head_arch)
 
     class Diverging(FakeInner):
         def rebuild(self) -> None:
             self._fused_kv_weight = torch.ones(8, 4, dtype=torch.bfloat16)
 
     with pytest.raises(RuntimeError, match="changed from"):
-        weight_publisher.publish(FakeDrafter(Diverging()), head, arch)
+        weight_publisher.publish(FakeDrafter(Diverging()), draft_head, head_arch)
 
 
 def test_infer_dtype_reads_the_first_parameter():

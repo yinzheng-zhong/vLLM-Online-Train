@@ -16,10 +16,10 @@ logger = init_logger(__name__)
 class RolloutBuffer:
     def __init__(
         self,
-        settings: BufferSettings,
-        shapes: EngineShapes,
-        sampler: PoolSampler,
-        stats: BufferStats,
+        buffer_settings: BufferSettings,
+        engine_shapes: EngineShapes,
+        pool_sampler: PoolSampler,
+        buffer_stats: BufferStats,
     ) -> None:
         """Host-side pool of finished rollouts, with capacity counted in tokens.
 
@@ -31,33 +31,33 @@ class RolloutBuffer:
         a draw needs no lock -- only a pool that cannot be resized underneath it.
 
         Args:
-            settings: Capacity and the length bounds.
-            shapes: Supplies `D`, which sets the minimum usable rollout length.
-            sampler: Draws training batches from the pool.
-            stats: Counters this buffer increments.
+            buffer_settings: Capacity and the length bounds.
+            engine_shapes: Supplies `D`, which sets the minimum usable rollout length.
+            pool_sampler: Draws training batches from the pool.
+            buffer_stats: Counters this buffer increments.
         """
-        self.settings = settings
-        self.shapes = shapes
-        self.sampler = sampler
-        self.stats = stats
-        self._pending: dict[str, PendingRollout] = {}
-        self._pool: list[RolloutRecord] = []
-        self._pool_tokens = 0
+        self.buffer_settings = buffer_settings
+        self.engine_shapes = engine_shapes
+        self.pool_sampler = pool_sampler
+        self.buffer_stats = buffer_stats
+        self._pending_rollouts: dict[str, PendingRollout] = {}
+        self._pooled_rollouts: list[RolloutRecord] = []
+        self._pooled_tokens = 0
 
     @property
     def num_rollouts(self) -> int:
         """Rollouts admitted to the pool."""
-        return len(self._pool)
+        return len(self._pooled_rollouts)
 
     @property
     def num_tokens(self) -> int:
         """Tokens the pool holds."""
-        return self._pool_tokens
+        return self._pooled_tokens
 
     @property
     def num_pending(self) -> int:
         """Requests still accumulating."""
-        return len(self._pending)
+        return len(self._pending_rollouts)
 
     def can_sample(self, count: int) -> bool:
         """Whether the pool holds at least `count` rollouts.
@@ -65,7 +65,7 @@ class RolloutBuffer:
         Args:
             count: Rollouts a training batch needs.
         """
-        return len(self._pool) >= count
+        return len(self._pooled_rollouts) >= count
 
     def begin(self, req_id: str, prompt_len: int) -> None:
         """Register a request. Idempotent across a chunked prefill.
@@ -74,8 +74,8 @@ class RolloutBuffer:
             req_id: The engine's request id.
             prompt_len: Tokens belonging to the prompt.
         """
-        if req_id not in self._pending:
-            self._pending[req_id] = PendingRollout(prompt_len=prompt_len)
+        if req_id not in self._pending_rollouts:
+            self._pending_rollouts[req_id] = PendingRollout(prompt_len=prompt_len)
 
     def add_chunk(
         self,
@@ -98,26 +98,30 @@ class RolloutBuffer:
         Raises:
             ValueError: If the three tensors disagree on length.
         """
-        pending = self._pending.get(req_id)
-        if pending is None or pending.dropped:
+        pending_rollout = self._pending_rollouts.get(req_id)
+        if pending_rollout is None or pending_rollout.dropped:
             return
 
-        num = int(token_ids.shape[0])
-        if num == 0:
+        num_chunk_tokens = int(token_ids.shape[0])
+        if num_chunk_tokens == 0:
             return
-        if features.shape[0] != num or final_hidden.shape[0] != num:
+        if (
+            features.shape[0] != num_chunk_tokens
+            or final_hidden.shape[0] != num_chunk_tokens
+        ):
             raise ValueError(
-                f"chunk for {req_id} disagrees on length: token_ids={num}, "
-                f"features={features.shape[0]}, "
+                f"chunk for {req_id} disagrees on length: "
+                f"token_ids={num_chunk_tokens}, features={features.shape[0]}, "
                 f"final_hidden={final_hidden.shape[0]}"
             )
 
-        if pending.num_tokens + num > self.settings.max_rollout_tokens:
+        max_rollout_tokens = self.buffer_settings.max_rollout_tokens
+        if pending_rollout.num_tokens + num_chunk_tokens > max_rollout_tokens:
             self.drop(req_id, reason="too_long")
             return
 
-        pending.append(token_ids, features, final_hidden)
-        self.stats.tokens_captured += num
+        pending_rollout.append(token_ids, features, final_hidden)
+        self.buffer_stats.tokens_captured += num_chunk_tokens
 
     def drop(self, req_id: str, *, reason: str) -> None:
         """Discard a rollout in progress and stop accumulating for it.
@@ -129,12 +133,14 @@ class RolloutBuffer:
             req_id: The engine's request id.
             reason: Names the `dropped_<reason>` counter to increment.
         """
-        pending = self._pending.get(req_id)
-        if pending is None:
-            self._pending[req_id] = PendingRollout(prompt_len=0, dropped=True)
-        elif not pending.dropped:
-            pending.discard()
-        self.stats.count_drop(reason)
+        pending_rollout = self._pending_rollouts.get(req_id)
+        if pending_rollout is None:
+            self._pending_rollouts[req_id] = PendingRollout(
+                prompt_len=0, dropped=True
+            )
+        elif not pending_rollout.dropped:
+            pending_rollout.discard()
+        self.buffer_stats.count_drop(reason)
         logger.debug("dropped rollout %s: reason=%s", req_id, reason)
 
     def finish(self, req_id: str) -> RolloutRecord | None:
@@ -147,45 +153,46 @@ class RolloutBuffer:
             The admitted record, or `None` when the rollout was dropped or is too
             short to yield an anchor.
         """
-        pending = self._pending.pop(req_id, None)
-        if pending is None or pending.dropped:
+        pending_rollout = self._pending_rollouts.pop(req_id, None)
+        if pending_rollout is None or pending_rollout.dropped:
             return None
-        if pending.num_tokens < self.settings.min_rollout_tokens:
-            self.stats.dropped_too_short += 1
+        if pending_rollout.num_tokens < self.buffer_settings.min_rollout_tokens:
+            self.buffer_stats.dropped_too_short += 1
             return None
 
-        record = RolloutRecord(
-            token_ids=torch.cat(pending.token_ids),
-            features=torch.cat(pending.features),
-            final_hidden=torch.cat(pending.final_hidden),
-            prompt_len=pending.prompt_len,
+        rollout_record = RolloutRecord(
+            token_ids=torch.cat(pending_rollout.token_ids),
+            features=torch.cat(pending_rollout.features),
+            final_hidden=torch.cat(pending_rollout.final_hidden),
+            prompt_len=pending_rollout.prompt_len,
         )
         # Mirrors `BlockBuilder.build`'s range exactly. The bound is `num_draft_tokens`
         # rather than `block_size`, because slot 0 re-feeds the anchor.
-        first_anchor = max(pending.prompt_len - 1, 0)
-        if record.num_tokens <= first_anchor + self.shapes.num_draft_tokens:
-            self.stats.dropped_too_short += 1
+        first_anchor = max(pending_rollout.prompt_len - 1, 0)
+        num_draft_tokens = self.engine_shapes.num_draft_tokens
+        if rollout_record.num_tokens <= first_anchor + num_draft_tokens:
+            self.buffer_stats.dropped_too_short += 1
             return None
 
-        self._admit(record)
+        self._admit(rollout_record)
         logger.debug(
             "admitted rollout %s: %d tokens, pool now %d rollouts/%d tokens",
             req_id,
-            record.num_tokens,
+            rollout_record.num_tokens,
             self.num_rollouts,
             self.num_tokens,
         )
-        return record
+        return rollout_record
 
-    def _admit(self, record: RolloutRecord) -> None:
+    def _admit(self, rollout_record: RolloutRecord) -> None:
         """Add a record to the pool, evicting the oldest until capacity holds."""
-        self._pool.append(record)
-        self._pool_tokens += record.num_tokens
-        self.stats.admitted += 1
-        while self._pool_tokens > self.settings.buffer_capacity_tokens:
-            evicted = self._pool.pop(0)
-            self._pool_tokens -= evicted.num_tokens
-            self.stats.evicted += 1
+        self._pooled_rollouts.append(rollout_record)
+        self._pooled_tokens += rollout_record.num_tokens
+        self.buffer_stats.admitted += 1
+        while self._pooled_tokens > self.buffer_settings.buffer_capacity_tokens:
+            evicted_record = self._pooled_rollouts.pop(0)
+            self._pooled_tokens -= evicted_record.num_tokens
+            self.buffer_stats.evicted += 1
 
     def sample(self, count: int) -> list[RolloutRecord]:
         """Draw a training batch without removing it from the pool.
@@ -200,21 +207,21 @@ class RolloutBuffer:
         Returns:
             The drawn rollouts.
         """
-        return self.sampler.draw(list(self._pool), count)
+        return self.pool_sampler.draw(list(self._pooled_rollouts), count)
 
     def clear(self) -> None:
         """Drop every pending and pooled rollout."""
-        self._pending.clear()
-        self._pool.clear()
-        self._pool_tokens = 0
+        self._pending_rollouts.clear()
+        self._pooled_rollouts.clear()
+        self._pooled_tokens = 0
 
     def as_metrics(self) -> dict[str, float]:
         """Counters plus the current fill, under a `buffer/` prefix."""
-        metrics = self.stats.as_metrics()
-        metrics["buffer/rollouts"] = float(len(self._pool))
-        metrics["buffer/tokens"] = float(self._pool_tokens)
-        metrics["buffer/pending"] = float(len(self._pending))
+        metrics = self.buffer_stats.as_metrics()
+        metrics["buffer/rollouts"] = float(len(self._pooled_rollouts))
+        metrics["buffer/tokens"] = float(self._pooled_tokens)
+        metrics["buffer/pending"] = float(len(self._pending_rollouts))
         metrics["buffer/fill"] = float(
-            self._pool_tokens / self.settings.buffer_capacity_tokens
+            self._pooled_tokens / self.buffer_settings.buffer_capacity_tokens
         )
         return metrics

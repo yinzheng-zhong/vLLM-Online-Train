@@ -14,17 +14,17 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Normalise the last dimension and scale by the weight.
 
         Args:
-            x: `[..., hidden_size]`.
+            hidden_states: `[..., hidden_size]`.
 
         Returns:
-            The normalised tensor, back in `x`'s dtype.
+            The normalised tensor, back in the input's dtype.
         """
-        dtype = x.dtype
-        x32 = x.float()
-        variance = x32.pow(2).mean(-1, keepdim=True)
-        x32 = x32 * torch.rsqrt(variance + self.variance_epsilon)
-        return (x32 * self.weight.float()).to(dtype)
+        input_dtype = hidden_states.dtype
+        hidden_fp32 = hidden_states.float()
+        variance = hidden_fp32.pow(2).mean(-1, keepdim=True)
+        hidden_fp32 = hidden_fp32 * torch.rsqrt(variance + self.variance_epsilon)
+        return (hidden_fp32 * self.weight.float()).to(input_dtype)

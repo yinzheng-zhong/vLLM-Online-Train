@@ -11,17 +11,17 @@ from vllm_online_train.engine.state.target_locator import TargetLocator
 
 
 def test_a_causal_lm_is_read_at_its_own_paths():
-    target = FakeTarget()
-    embed, lm_head = TargetLocator().find(target)
-    assert embed is target.model.embed_tokens
-    assert lm_head is target.lm_head
+    target_model = FakeTarget()
+    embed_tokens, lm_head = TargetLocator().find(target_model)
+    assert embed_tokens is target_model.model.embed_tokens
+    assert lm_head is target_model.lm_head
 
 
 def test_a_multimodal_wrapper_is_read_through_its_language_model():
-    target = FakeMultiModalTarget()
-    embed, lm_head = TargetLocator().find(target)
-    assert embed is target.language_model.model.embed_tokens
-    assert lm_head is target.language_model.lm_head
+    target_model = FakeMultiModalTarget()
+    embed_tokens, lm_head = TargetLocator().find(target_model)
+    assert embed_tokens is target_model.language_model.model.embed_tokens
+    assert lm_head is target_model.language_model.lm_head
 
 
 def test_an_embedding_table_at_the_top_level_is_accepted():
@@ -31,10 +31,10 @@ def test_an_embedding_table_at_the_top_level_is_accepted():
             self.embed_tokens = nn.Embedding(VOCAB, HIDDEN)
             self.lm_head = nn.Linear(HIDDEN, VOCAB, bias=False)
 
-    target = Flat()
-    embed, lm_head = TargetLocator().find(target)
-    assert embed is target.embed_tokens
-    assert lm_head is target.lm_head
+    target_model = Flat()
+    embed_tokens, lm_head = TargetLocator().find(target_model)
+    assert embed_tokens is target_model.embed_tokens
+    assert lm_head is target_model.lm_head
 
 
 def test_the_outer_model_wins_over_the_language_model():
@@ -44,10 +44,10 @@ def test_the_outer_model_wins_over_the_language_model():
             self.model = FakeTarget().model
             self.lm_head = nn.Linear(HIDDEN, VOCAB, bias=False)
 
-    target = Both()
-    embed, lm_head = TargetLocator().find(target)
-    assert embed is target.model.embed_tokens
-    assert lm_head is target.lm_head
+    target_model = Both()
+    embed_tokens, lm_head = TargetLocator().find(target_model)
+    assert embed_tokens is target_model.model.embed_tokens
+    assert lm_head is target_model.lm_head
 
 
 def test_a_language_model_that_cannot_be_reached_is_not_fatal():
@@ -63,10 +63,10 @@ def test_a_language_model_that_cannot_be_reached_is_not_fatal():
         def get_language_model(self):
             raise NotImplementedError("No language model found in Unmarked!")
 
-    target = Unmarked()
-    embed, lm_head = TargetLocator().find(target)
-    assert embed is target.model.embed_tokens
-    assert lm_head is target.lm_head
+    target_model = Unmarked()
+    embed_tokens, lm_head = TargetLocator().find(target_model)
+    assert embed_tokens is target_model.model.embed_tokens
+    assert lm_head is target_model.lm_head
 
 
 def test_a_weightless_module_at_a_known_path_is_refused():
@@ -94,8 +94,8 @@ def test_the_refusal_names_what_it_searched():
 def test_a_borrowed_weight_survives_the_walk():
     """The located modules are the live ones, so a weight written on the target shows
     through them."""
-    target = FakeMultiModalTarget()
-    embed, _ = TargetLocator().find(target)
+    target_model = FakeMultiModalTarget()
+    embed_tokens, _ = TargetLocator().find(target_model)
     with torch.no_grad():
-        target.language_model.model.embed_tokens.weight[0].fill_(3.0)
-    assert torch.equal(embed.weight[0], torch.full((HIDDEN,), 3.0))
+        target_model.language_model.model.embed_tokens.weight[0].fill_(3.0)
+    assert torch.equal(embed_tokens.weight[0], torch.full((HIDDEN,), 3.0))

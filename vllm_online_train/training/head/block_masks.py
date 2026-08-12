@@ -63,9 +63,11 @@ class BlockMaskBuilder:
         allow_context = (kv_idx < context_len) & (kv_idx < anchor_per_query)
 
         if context_valid_mask is not None:
-            padded = context_valid_mask.bool().unsqueeze(1)
-            padded = torch.nn.functional.pad(padded, (0, q_len), value=True)
-            allow_context = allow_context & padded
+            valid_kv_mask = context_valid_mask.bool().unsqueeze(1)
+            valid_kv_mask = torch.nn.functional.pad(
+                valid_kv_mask, (0, q_len), value=True
+            )
+            allow_context = allow_context & valid_kv_mask
 
         # Draft region: only within the same block.
         is_draft = kv_idx >= context_len
@@ -76,32 +78,34 @@ class BlockMaskBuilder:
             same_block & (kv_slot <= q_slot) if intra_block_causal else same_block
         )
 
-        allow = allow_context | allow_draft
+        allow_mask = allow_context | allow_draft
 
-        keep = block_keep_mask.gather(1, block_of_query).unsqueeze(-1)
-        allow = allow & keep
+        keep_per_query = block_keep_mask.gather(1, block_of_query).unsqueeze(-1)
+        allow_mask = allow_mask & keep_per_query
 
         # Reopens each query's own slot after closing padding blocks, so no row is
         # fully masked: a softmax over an all -inf row yields NaN.
         diagonal = kv_idx == (context_len + q_idx)
-        allow = allow | diagonal.expand(batch_size, -1, -1)
+        allow_mask = allow_mask | diagonal.expand(batch_size, -1, -1)
 
-        return allow.unsqueeze(1)
+        return allow_mask.unsqueeze(1)
 
     def to_additive_mask(
-        self, allow: torch.Tensor, dtype: torch.dtype
+        self, allow_mask: torch.Tensor, dtype: torch.dtype
     ) -> torch.Tensor:
         """Convert a boolean "may attend" mask into an additive attention bias.
 
         Args:
-            allow: Bool tensor; True means "may attend".
+            allow_mask: Bool tensor; True means "may attend".
             dtype: Bias dtype; disallowed entries become its minimum.
 
         Returns:
-            A tensor of `allow`'s shape, 0 where allowed.
+            A tensor of `allow_mask`'s shape, 0 where allowed.
         """
-        bias = torch.zeros(allow.shape, dtype=dtype, device=allow.device)
-        return bias.masked_fill(~allow, torch.finfo(dtype).min)
+        attn_bias = torch.zeros(
+            allow_mask.shape, dtype=dtype, device=allow_mask.device
+        )
+        return attn_bias.masked_fill(~allow_mask, torch.finfo(dtype).min)
 
     def block_position_ids(
         self, anchor_positions: torch.Tensor, block_size: int
@@ -115,10 +119,10 @@ class BlockMaskBuilder:
         Returns:
             `[B, A * block_size]` running `a_m, a_m+1, ..., a_m+block_size-1`.
         """
-        offsets = torch.arange(block_size, device=anchor_positions.device).view(
-            1, 1, -1
-        )
-        return (anchor_positions.unsqueeze(-1) + offsets).flatten(1)
+        slot_offsets = torch.arange(
+            block_size, device=anchor_positions.device
+        ).view(1, 1, -1)
+        return (anchor_positions.unsqueeze(-1) + slot_offsets).flatten(1)
 
     @staticmethod
     def _check_shapes(

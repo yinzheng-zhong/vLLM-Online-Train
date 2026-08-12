@@ -63,7 +63,7 @@ def register() -> None:
     """
     from vllm_online_train.engine.hook.settings_loader import SettingsLoader
 
-    config = os.environ.get(SettingsLoader.CONFIG_ENV) or "<unset>"
+    config_source = os.environ.get(SettingsLoader.CONFIG_ENV) or "<unset>"
     try:
         from vllm_online_train.engine.hook import capture_hook
 
@@ -82,5 +82,5 @@ def register() -> None:
         "first DFlash step, or logs why it cannot.",
         version(),
         SettingsLoader.CONFIG_ENV,
-        config,
+        config_source,
     )

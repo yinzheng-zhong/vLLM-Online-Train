@@ -8,26 +8,31 @@ class ValidPositions:
     """Decides how many of a request's scheduled positions have usable activations."""
 
     @staticmethod
-    def count(*, scheduled: int, num_draft: int, num_valid: int) -> int:
+    def count(
+        *,
+        num_scheduled_tokens: int,
+        num_draft_tokens: int,
+        num_valid_tokens: int,
+    ) -> int:
         """Usable positions for one request in one step.
 
-        With `r` of `num_draft` draft tokens accepted, the activations at block
+        With `r` of `num_draft_tokens` draft tokens accepted, the activations at block
         position `i` are conditioned on `[..., x, d_1..d_i]`, so they sit on the true
-        sequence only for `i <= r`. `num_valid` counts the non-`-1` entries of the
-        sampled row, which is `r + 1`.
+        sequence only for `i <= r`. `num_valid_tokens` counts the non-`-1` entries of
+        the sampled row, which is `r + 1`.
 
         Args:
-            scheduled: Positions the step scheduled for this request.
-            num_draft: Draft tokens the step verified for it.
-            num_valid: Non-`-1` entries in its sampled row.
+            num_scheduled_tokens: Positions the step scheduled for this request.
+            num_draft_tokens: Draft tokens the step verified for it.
+            num_valid_tokens: Non-`-1` entries in its sampled row.
 
         Returns:
             Leading positions to keep. Every scheduled position when no speculation
             ran.
         """
-        if num_draft == 0:
-            return scheduled
-        return min(num_valid, scheduled)
+        if num_draft_tokens == 0:
+            return num_scheduled_tokens
+        return min(num_valid_tokens, num_scheduled_tokens)
 
     @staticmethod
     def draft_counts(
@@ -44,7 +49,7 @@ class ValidPositions:
         """
         if spec_decode_metadata is None:
             return [0] * num_reqs
-        counts = list(spec_decode_metadata.num_draft_tokens)
-        if len(counts) < num_reqs:
-            counts.extend([0] * (num_reqs - len(counts)))
-        return counts
+        draft_counts = list(spec_decode_metadata.num_draft_tokens)
+        if len(draft_counts) < num_reqs:
+            draft_counts.extend([0] * (num_reqs - len(draft_counts)))
+        return draft_counts

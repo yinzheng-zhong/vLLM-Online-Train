@@ -28,13 +28,15 @@ class JsonlMetricsSink:
         if path is None:
             return
 
-        base = Path(path).expanduser()
+        requested_path = Path(path).expanduser()
         try:
-            base.parent.mkdir(parents=True, exist_ok=True)
-            stem = base.with_name(f"{base.stem}.{os.getpid()}{base.suffix}")
-            self._path = stem
-            self._handle = stem.open("a", buffering=1)
-            logger.info("Online training metrics -> %s", stem)
+            requested_path.parent.mkdir(parents=True, exist_ok=True)
+            pid_path = requested_path.with_name(
+                f"{requested_path.stem}.{os.getpid()}{requested_path.suffix}"
+            )
+            self._path = pid_path
+            self._handle = pid_path.open("a", buffering=1)
+            logger.info("Online training metrics -> %s", pid_path)
         except OSError as exc:
             logger.warning(
                 "Could not open online-train metrics path %s (%s); metrics disabled.",
@@ -53,17 +55,17 @@ class JsonlMetricsSink:
         """Whether writes reach a file."""
         return self._handle is not None
 
-    def write(self, event: str, values: dict[str, Any]) -> None:
+    def write(self, event: str, field_values: dict[str, Any]) -> None:
         """Append one record. Never raises into the caller.
 
         Args:
             event: Record kind, e.g. `"train"` or `"start"`.
-            values: Field name to value.
+            field_values: Field name to value.
         """
         if self._handle is None:
             return
         record = {"t": time.time(), "event": event}
-        record.update(values)
+        record.update(field_values)
         line = json.dumps(record, default=float)
         try:
             with self._lock:

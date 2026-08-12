@@ -7,18 +7,18 @@ logger = init_logger(__name__)
 
 
 class RequestSampler:
-    def __init__(self, settings: CaptureSettings, seed: int) -> None:
+    def __init__(self, capture_settings: CaptureSettings, seed: int) -> None:
         """Decides once per request whether its activations are captured.
 
         Args:
-            settings: Supplies the capture sample rate.
+            capture_settings: Supplies the capture sample rate.
             seed: Keys the hash, so the decision is reproducible across runs.
         """
-        self.settings = settings
+        self.capture_settings = capture_settings
         self.seed = seed
         logger.debug(
             "RequestSampler configured: capture_sample_rate=%s, seed=%d",
-            settings.capture_sample_rate,
+            capture_settings.capture_sample_rate,
             seed,
         )
 
@@ -33,10 +33,10 @@ class RequestSampler:
             below the rate. The same id always gives the same answer, so a chunked
             prefill stays consistent with itself.
         """
-        rate = self.settings.capture_sample_rate
-        if rate >= 1.0:
+        sample_rate = self.capture_settings.capture_sample_rate
+        if sample_rate >= 1.0:
             return True
-        return self.stable_unit_hash(req_id, self.seed) < rate
+        return self.stable_unit_hash(req_id, self.seed) < sample_rate
 
     @staticmethod
     def stable_unit_hash(text: str, seed: int) -> float:

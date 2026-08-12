@@ -24,18 +24,22 @@ class PackageTag(logging.Filter):
         return True
 
 
-def init_logger(name: str) -> logging.Logger:
+def init_logger(module_name: str) -> logging.Logger:
     """A tagged logger inside vLLM's own `vllm` logger tree.
 
     Args:
-        name: The calling module's `__name__`.
+        module_name: The calling module's `__name__`.
 
     Returns:
         A logger named `vllm.online_train.<module path>`, carrying vLLM's handler,
         format and level, whose records are tagged with `TAG`.
     """
-    suffix = name.partition(".")[2]
-    logger = init_vllm_logger(f"{LOGGER_ROOT}.{suffix}" if suffix else LOGGER_ROOT)
-    if not any(isinstance(existing, PackageTag) for existing in logger.filters):
+    module_suffix = module_name.partition(".")[2]
+    logger = init_vllm_logger(
+        f"{LOGGER_ROOT}.{module_suffix}" if module_suffix else LOGGER_ROOT
+    )
+    if not any(
+        isinstance(existing_filter, PackageTag) for existing_filter in logger.filters
+    ):
         logger.addFilter(PackageTag())
     return logger

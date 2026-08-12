@@ -39,25 +39,30 @@ class RotaryEmbedding(nn.Module):
             Two `[B, T, head_dim]` tables.
         """
         freqs = positions.float().unsqueeze(-1) * self.inv_freq.view(1, 1, -1)
-        emb = torch.cat([freqs, freqs], dim=-1)
-        return emb.cos(), emb.sin()
+        angles = torch.cat([freqs, freqs], dim=-1)
+        return angles.cos(), angles.sin()
 
     @staticmethod
-    def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    def rotate_half(projected_heads: torch.Tensor) -> torch.Tensor:
         """Swap the halves of the last dimension, negating the second.
 
         Args:
-            x: `[..., head_dim]`.
+            projected_heads: `[..., head_dim]`.
 
         Returns:
-            `[-x_second_half, x_first_half]` concatenated.
+            `[-second_half, first_half]` concatenated.
         """
-        half = x.shape[-1] // 2
-        return torch.cat([-x[..., half:], x[..., :half]], dim=-1)
+        half = projected_heads.shape[-1] // 2
+        return torch.cat(
+            [-projected_heads[..., half:], projected_heads[..., :half]], dim=-1
+        )
 
     @classmethod
     def rotate(
-        cls, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+        cls,
+        projected_heads: torch.Tensor,
+        cos_table: torch.Tensor,
+        sin_table: torch.Tensor,
     ) -> torch.Tensor:
         """Apply the rotation to projected heads.
 
@@ -65,13 +70,15 @@ class RotaryEmbedding(nn.Module):
         silently stop any `parent.apply(fn)` recursion at this node.
 
         Args:
-            x: `[B, heads, T, head_dim]`.
-            cos: `[B, T, head_dim]` cosine table.
-            sin: `[B, T, head_dim]` sine table.
+            projected_heads: `[B, heads, T, head_dim]`.
+            cos_table: `[B, T, head_dim]` cosine table.
+            sin_table: `[B, T, head_dim]` sine table.
 
         Returns:
             `[B, heads, T, head_dim]` rotated.
         """
-        cos = cos.unsqueeze(1).to(x.dtype)
-        sin = sin.unsqueeze(1).to(x.dtype)
-        return x * cos + cls.rotate_half(x) * sin
+        cos_table = cos_table.unsqueeze(1).to(projected_heads.dtype)
+        sin_table = sin_table.unsqueeze(1).to(projected_heads.dtype)
+        return (
+            projected_heads * cos_table + cls.rotate_half(projected_heads) * sin_table
+        )

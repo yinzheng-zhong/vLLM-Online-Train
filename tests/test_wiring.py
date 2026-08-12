@@ -24,22 +24,32 @@ def assembler() -> SessionAssembler:
 def test_the_mask_builder_is_shared_across_packages(assembler):
     """The head's attention geometry and the objective's teacher gather must agree
     on where a block's slots sit."""
-    assert assembler.head_factory.masks is assembler.masks
-    assert assembler.teacher.positions is assembler.masks
+    assert (
+        assembler.head_factory.block_mask_builder is assembler.block_mask_builder
+    )
+    assert (
+        assembler.teacher_scorer.block_positions is assembler.block_mask_builder
+    )
 
 
 def test_the_checkpoint_writer_and_publisher_share_a_naming_rewriter(assembler):
     """A checkpoint and a hot publish that named tensors differently would make one
     of the two paths untested by the other."""
-    assert assembler.writer.naming is assembler.naming
-    assert assembler.publisher.naming is assembler.naming
+    assert (
+        assembler.checkpoint_writer.weight_name_rewriter
+        is assembler.weight_name_rewriter
+    )
+    assert (
+        assembler.weight_publisher.weight_name_rewriter
+        is assembler.weight_name_rewriter
+    )
 
 
 def test_the_head_factory_and_publisher_share_a_weight_helper(assembler):
     """Loading and exporting the borrowed tensors is one job, so a second helper
     would be a second place for the freeze rules to drift."""
-    assert assembler.head_factory.weights is assembler.weights
-    assert assembler.publisher.weights is assembler.weights
+    assert assembler.head_factory.head_weights is assembler.head_weights
+    assert assembler.weight_publisher.head_weights is assembler.head_weights
 
 
 @pytest.mark.parametrize(
@@ -79,8 +89,8 @@ def test_the_hook_is_wired_once_and_shared():
     from vllm_online_train.engine.hook import capture_hook
 
     assert hook_package.capture_hook is capture_hook
-    assert capture_hook.loader.factory is not None
-    assert capture_hook.patcher.guard is not None
+    assert capture_hook.settings_loader.settings_factory is not None
+    assert capture_hook.method_patcher.signature_guard is not None
 
 
 def module_scope_imports(tree: ast.Module) -> list[str]:

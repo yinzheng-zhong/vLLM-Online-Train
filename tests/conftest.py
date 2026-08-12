@@ -17,6 +17,7 @@ from torch import nn
 from tests.instances import (
     arch_factory,
     block_builder,
+    block_mask_builder,
     checkpoint_writer,
     config_resolver,
     device_placement,
@@ -25,13 +26,12 @@ from tests.instances import (
     head_factory,
     head_weights,
     kl_divergence,
-    layer_planner,
-    mask_builder,
     schedule_factory,
     settings_factory,
+    target_layer_planner,
     teacher_scorer,
     valid_positions,
-    weight_naming,
+    weight_name_rewriter,
     weight_publisher,
 )
 from vllm_online_train.config.settings import OnlineTrainSettings
@@ -50,6 +50,7 @@ from vllm_online_train.training.optim.trainer import OnlineTrainer
 __all__ = [
     "arch_factory",
     "block_builder",
+    "block_mask_builder",
     "checkpoint_writer",
     "config_resolver",
     "device_placement",
@@ -58,13 +59,12 @@ __all__ = [
     "head_factory",
     "head_weights",
     "kl_divergence",
-    "layer_planner",
-    "mask_builder",
     "schedule_factory",
     "settings_factory",
+    "target_layer_planner",
     "teacher_scorer",
     "valid_positions",
-    "weight_naming",
+    "weight_name_rewriter",
     "weight_publisher",
 ]
 
@@ -102,7 +102,7 @@ def make_settings(**overrides: Any) -> OnlineTrainSettings:
     Returns:
         The sectioned settings.
     """
-    flat = dict(
+    field_values = dict(
         enabled=True,
         anchors_per_sequence=4,
         sequences_per_step=2,
@@ -111,8 +111,8 @@ def make_settings(**overrides: Any) -> OnlineTrainSettings:
         buffer_capacity_tokens=256,
         kl_chunk_size=8,
     )
-    flat.update(overrides)
-    return settings_factory.create(flat)
+    field_values.update(overrides)
+    return settings_factory.create(field_values)
 
 
 def make_shapes(**overrides: Any) -> EngineShapes:
@@ -124,7 +124,7 @@ def make_shapes(**overrides: Any) -> EngineShapes:
     Returns:
         The shapes.
     """
-    fields = dict(
+    shape_fields = dict(
         aux_layer_ids=tuple(range(1, NUM_FEATURES + 1)),
         hidden_size=HIDDEN,
         vocab_size=VOCAB,
@@ -132,19 +132,19 @@ def make_shapes(**overrides: Any) -> EngineShapes:
         mask_token_id=0,
         feature_dtype=torch.float32,
     )
-    fields.update(overrides)
-    return EngineShapes(**fields)
+    shape_fields.update(overrides)
+    return EngineShapes(**shape_fields)
 
 
 def make_config(
-    settings: OnlineTrainSettings | None = None,
+    online_train_settings: OnlineTrainSettings | None = None,
     position_decay_gamma: float = 4.0,
     **shape_overrides: Any,
 ) -> ResolvedConfig:
     """A `ResolvedConfig` built directly.
 
     Args:
-        settings: Operator settings. Defaults to `make_settings()`.
+        online_train_settings: Operator settings. Defaults to `make_settings()`.
         position_decay_gamma: The resolved decay constant.
         **shape_overrides: Passed to `make_shapes`.
 
@@ -152,8 +152,8 @@ def make_config(
         The resolved config.
     """
     return ResolvedConfig(
-        settings=settings or make_settings(),
-        shapes=make_shapes(**shape_overrides),
+        online_train_settings=online_train_settings or make_settings(),
+        engine_shapes=make_shapes(**shape_overrides),
         position_decay_gamma=position_decay_gamma,
     )
 
@@ -167,7 +167,7 @@ def make_arch(**overrides: Any) -> DFlashHeadArch:
     Returns:
         The arch.
     """
-    fields = dict(
+    arch_fields = dict(
         num_layers=NUM_LAYERS,
         hidden_size=HIDDEN,
         intermediate_size=2 * HIDDEN,
@@ -183,31 +183,39 @@ def make_arch(**overrides: Any) -> DFlashHeadArch:
         rope_theta=1e6,
         attention_bias=False,
     )
-    fields.update(overrides)
-    return DFlashHeadArch(**fields)
+    arch_fields.update(overrides)
+    return DFlashHeadArch(**arch_fields)
 
 
-def make_buffer(config: ResolvedConfig) -> RolloutBuffer:
+def make_buffer(resolved_config: ResolvedConfig) -> RolloutBuffer:
     """A pool wired the way the composition root wires it.
 
     Args:
-        config: Supplies the buffer settings, the shapes and the seed.
+        resolved_config: Supplies the buffer settings, the shapes and the seed.
 
     Returns:
         The pool.
     """
-    seed = config.settings.bookkeeping.seed
-    sampler = PoolSampler(config.settings.buffer, random.Random(seed))
-    return RolloutBuffer(config.settings.buffer, config.shapes, sampler, BufferStats())
+    online_train_settings = resolved_config.online_train_settings
+    pool_sampler = PoolSampler(
+        online_train_settings.buffer,
+        random.Random(online_train_settings.bookkeeping.seed),
+    )
+    return RolloutBuffer(
+        online_train_settings.buffer,
+        resolved_config.engine_shapes,
+        pool_sampler,
+        BufferStats(),
+    )
 
 
 def make_collator(
-    config: ResolvedConfig, seed: int = 0, device: torch.device = CPU
+    resolved_config: ResolvedConfig, seed: int = 0, device: torch.device = CPU
 ) -> RolloutCollator:
     """A collator wired the way the composition root wires it.
 
     Args:
-        config: Supplies the anchor settings and the shapes.
+        resolved_config: Supplies the anchor settings and the shapes.
         seed: Seeds the anchor subsample.
         device: Where the collated batch is sent.
 
@@ -216,73 +224,79 @@ def make_collator(
     """
     return RolloutCollator(
         block_builder,
-        AnchorSampler(config.settings.anchors, random.Random(seed)),
+        AnchorSampler(
+            resolved_config.online_train_settings.anchors, random.Random(seed)
+        ),
         DeviceTransfer(device),
-        config.shapes,
+        resolved_config.engine_shapes,
     )
 
 
 def make_objective(
-    config: ResolvedConfig,
-    head: Any,
+    resolved_config: ResolvedConfig,
+    draft_head: Any,
     teacher_project: Any,
 ) -> SFTObjective:
     """An objective wired the way the composition root wires it.
 
     Args:
-        config: Supplies the objective settings and the decay constant.
-        head: Supplies the student projection.
+        resolved_config: Supplies the objective settings and the decay constant.
+        draft_head: Supplies the student projection.
         teacher_project: `[N, H] -> [N, vocab]`.
 
     Returns:
         The objective.
     """
     return SFTObjective(
-        config.settings.objective,
+        resolved_config.online_train_settings.objective,
         kl_divergence,
         teacher_scorer,
-        PositionDecay(config.position_decay_gamma),
-        head.project_to_vocab,
+        PositionDecay(resolved_config.position_decay_gamma),
+        draft_head.project_to_vocab,
         teacher_project,
     )
 
 
 def make_trainer(
-    config: ResolvedConfig,
-    head: Any,
-    objective: SFTObjective,
-    collator: RolloutCollator | None = None,
+    resolved_config: ResolvedConfig,
+    draft_head: Any,
+    sft_objective: SFTObjective,
+    rollout_collator: RolloutCollator | None = None,
 ) -> OnlineTrainer:
     """A trainer wired the way the composition root wires it.
 
     Args:
-        config: Supplies the optimizer settings and the batch size.
-        head: The head to train.
-        objective: Scores a replayed batch.
-        collator: Defaults to `make_collator(config)`.
+        resolved_config: Supplies the optimizer settings and the batch size.
+        draft_head: The head to train.
+        sft_objective: Scores a replayed batch.
+        rollout_collator: Defaults to `make_collator(resolved_config)`.
 
     Returns:
         The trainer.
     """
+    online_train_settings = resolved_config.online_train_settings
     optimizer = torch.optim.AdamW(
-        head.trainable_parameters(),
-        lr=config.settings.optim.learning_rate,
-        weight_decay=config.settings.optim.weight_decay,
+        draft_head.trainable_parameters(),
+        lr=online_train_settings.optim.learning_rate,
+        weight_decay=online_train_settings.optim.weight_decay,
     )
     return OnlineTrainer(
-        config.settings.optim,
-        head,
+        online_train_settings.optim,
+        draft_head,
         head_weights,
-        objective,
-        collator or make_collator(config),
+        sft_objective,
+        rollout_collator or make_collator(resolved_config),
         schedule_factory,
         optimizer,
-        config.settings.anchors.sequences_per_step,
+        online_train_settings.anchors.sequences_per_step,
     )
 
 
 def make_record(
-    num_tokens: int = 40, prompt_len: int = 10, seed: int = 0, hidden: int = HIDDEN
+    num_tokens: int = 40,
+    prompt_len: int = 10,
+    seed: int = 0,
+    hidden_size: int = HIDDEN,
 ) -> RolloutRecord:
     """A random rollout of the toy shape.
 
@@ -290,7 +304,7 @@ def make_record(
         num_tokens: Positions the record covers.
         prompt_len: Tokens belonging to the prompt.
         seed: Seeds the random tensors.
-        hidden: Hidden width.
+        hidden_size: Hidden width.
 
     Returns:
         The record.
@@ -300,8 +314,10 @@ def make_record(
         token_ids=torch.randint(
             0, VOCAB, (num_tokens,), generator=generator, dtype=torch.int32
         ),
-        features=torch.randn(num_tokens, NUM_FEATURES * hidden, generator=generator),
-        final_hidden=torch.randn(num_tokens, hidden, generator=generator),
+        features=torch.randn(
+            num_tokens, NUM_FEATURES * hidden_size, generator=generator
+        ),
+        final_hidden=torch.randn(num_tokens, hidden_size, generator=generator),
         prompt_len=prompt_len,
     )
 
@@ -313,7 +329,7 @@ def fake_vllm_config(
     hidden_size: int = HIDDEN,
     num_hidden_layers: int = NUM_LAYERS,
     method: str = "dflash",
-    settings: OnlineTrainSettings | None = None,
+    online_train_settings: OnlineTrainSettings | None = None,
     **dflash_extra: Any,
 ) -> SimpleNamespace:
     """A stand-in exposing only what the resolver reads.
@@ -324,7 +340,7 @@ def fake_vllm_config(
         hidden_size: Target hidden width.
         num_hidden_layers: Draft layer count.
         method: The speculative method the engine reports.
-        settings: Hung off the config as `online_train_config`.
+        online_train_settings: Hung off the config as `online_train_config`.
         **dflash_extra: Merged into the `dflash_config` block.
 
     Returns:
@@ -359,35 +375,35 @@ def fake_vllm_config(
             get_vocab_size=lambda: VOCAB,
             dtype=torch.float32,
         ),
-        online_train_config=settings,
+        online_train_config=online_train_settings,
     )
 
 
 class FakeTargetBody(nn.Module):
     """The decoder stack, holding the embedding table where vLLM holds it."""
 
-    def __init__(self, vocab: int, hidden: int) -> None:
+    def __init__(self, vocab_size: int, hidden_size: int) -> None:
         """
         Args:
-            vocab: Vocabulary size.
-            hidden: Hidden width.
+            vocab_size: Vocabulary size.
+            hidden_size: Hidden width.
         """
         super().__init__()
-        self.embed_tokens = nn.Embedding(vocab, hidden)
+        self.embed_tokens = nn.Embedding(vocab_size, hidden_size)
 
 
 class FakeTarget(nn.Module):
     """A stand-in target laid out the way vLLM lays out a causal LM."""
 
-    def __init__(self, vocab: int = VOCAB, hidden: int = HIDDEN) -> None:
+    def __init__(self, vocab_size: int = VOCAB, hidden_size: int = HIDDEN) -> None:
         """
         Args:
-            vocab: Vocabulary size.
-            hidden: Hidden width.
+            vocab_size: Vocabulary size.
+            hidden_size: Hidden width.
         """
         super().__init__()
-        self.model = FakeTargetBody(vocab, hidden)
-        self.lm_head = nn.Linear(hidden, vocab, bias=False)
+        self.model = FakeTargetBody(vocab_size, hidden_size)
+        self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False)
         self.compute_logits_calls = 0
 
     @property
@@ -395,85 +411,85 @@ class FakeTarget(nn.Module):
         """The embedding table."""
         return self.model.embed_tokens
 
-    def compute_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+    def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Project through the vocabulary head.
 
         Args:
-            hidden: `[N, H]`.
+            hidden_states: `[N, H]`.
 
         Returns:
             `[N, vocab]`.
         """
         self.compute_logits_calls += 1
-        return self.lm_head(hidden)
+        return self.lm_head(hidden_states)
 
 
 class FakeMultiModalTarget(nn.Module):
     """A stand-in target laid out the way vLLM lays out a multimodal model."""
 
-    def __init__(self, vocab: int = VOCAB, hidden: int = HIDDEN) -> None:
+    def __init__(self, vocab_size: int = VOCAB, hidden_size: int = HIDDEN) -> None:
         """
         Args:
-            vocab: Vocabulary size.
-            hidden: Hidden width.
+            vocab_size: Vocabulary size.
+            hidden_size: Hidden width.
         """
         super().__init__()
-        self.language_model = FakeTarget(vocab, hidden)
+        self.language_model = FakeTarget(vocab_size, hidden_size)
 
     def get_language_model(self) -> FakeTarget:
         """The text stack this delegates generation to."""
         return self.language_model
 
-    def compute_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+    def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Project through the language model's vocabulary head.
 
         Args:
-            hidden: `[N, H]`.
+            hidden_states: `[N, H]`.
 
         Returns:
             `[N, vocab]`.
         """
-        return self.language_model.compute_logits(hidden)
+        return self.language_model.compute_logits(hidden_states)
 
 
 @pytest.fixture
-def settings() -> OnlineTrainSettings:
+def online_train_settings() -> OnlineTrainSettings:
     return make_settings()
 
 
 @pytest.fixture
-def config() -> ResolvedConfig:
+def resolved_config() -> ResolvedConfig:
     return make_config()
 
 
 @pytest.fixture
-def arch() -> DFlashHeadArch:
+def head_arch() -> DFlashHeadArch:
     return make_arch()
 
 
 @pytest.fixture
-def head(arch):
+def draft_head(head_arch):
     torch.manual_seed(0)
-    return head_factory.create(arch)
+    return head_factory.create(head_arch)
 
 
 @pytest.fixture
-def records() -> list[RolloutRecord]:
+def rollout_records() -> list[RolloutRecord]:
     return [make_record(40, 10, seed=1), make_record(36, 8, seed=2)]
 
 
 @pytest.fixture
-def collator(config) -> RolloutCollator:
-    return make_collator(config)
+def rollout_collator(resolved_config) -> RolloutCollator:
+    return make_collator(resolved_config)
 
 
 @pytest.fixture
-def batch(collator, records):
-    return collator.collate(records)
+def replay_batch(rollout_collator, rollout_records):
+    return rollout_collator.collate(rollout_records)
 
 
 @pytest.fixture
-def teacher(head):
+def teacher_projection(draft_head):
     """A frozen stand-in for the target's LM head, shared with the student.
 
     Sharing the projection means a perfectly trained head reaches zero loss, which is
@@ -484,11 +500,11 @@ def teacher(head):
         projection.weight.copy_(torch.randn(VOCAB, HIDDEN) * 0.1)
     projection.requires_grad_(False)
     head_weights.load_shared(
-        head, torch.randn(VOCAB, HIDDEN) * 0.05, projection.weight
+        draft_head, torch.randn(VOCAB, HIDDEN) * 0.05, projection.weight
     )
     return projection
 
 
 @pytest.fixture
-def objective(config, head, teacher) -> SFTObjective:
-    return make_objective(config, head, teacher)
+def sft_objective(resolved_config, draft_head, teacher_projection) -> SFTObjective:
+    return make_objective(resolved_config, draft_head, teacher_projection)

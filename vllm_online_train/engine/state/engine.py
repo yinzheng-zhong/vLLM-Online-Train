@@ -10,7 +10,7 @@ logger = init_logger(__name__)
 class EngineStateProvider:
     def __init__(
         self,
-        locator: TargetLocator,
+        target_locator: TargetLocator,
         target_model: nn.Module,
         device: torch.device,
         serving_dtype: torch.dtype,
@@ -25,7 +25,7 @@ class EngineStateProvider:
         serve it from a second one.
 
         Args:
-            locator: Finds the borrowed modules on the target.
+            target_locator: Finds the borrowed modules on the target.
             target_model: The model the engine is serving.
             device: Where its weights live.
             serving_dtype: The dtype the engine is configured to serve at.
@@ -33,10 +33,10 @@ class EngineStateProvider:
         Raises:
             ValueError: If the model exposes no embedding table or no LM head.
         """
-        self._target = target_model
+        self._target_model = target_model
         self._device = device
         self._serving_dtype = serving_dtype
-        self._embed, self._lm_head = locator.find(target_model)
+        self._embed_tokens, self._lm_head = target_locator.find(target_model)
         logger.debug(
             "engine state provider bound to %s, serving dtype %s", device, serving_dtype
         )
@@ -49,7 +49,7 @@ class EngineStateProvider:
     @property
     def target_dtype(self) -> torch.dtype:
         """The target's parameter dtype."""
-        return self._embed.weight.dtype
+        return self._embed_tokens.weight.dtype
 
     @property
     def serving_dtype(self) -> torch.dtype:
@@ -70,7 +70,7 @@ class EngineStateProvider:
         Returns:
             `[vocab, hidden]` at `dtype`.
         """
-        return self._borrow(self._embed.weight, device, dtype)
+        return self._borrow(self._embed_tokens.weight, device, dtype)
 
     def lm_head_weight(
         self,
@@ -108,25 +108,27 @@ class EngineStateProvider:
         Returns:
             A detached copy on `device`, at `dtype`.
         """
-        moved = weight.detach().to(
+        borrowed = weight.detach().to(
             device=device or self._device, dtype=dtype or torch.float32
         )
         # Sharing storage with the parameter means both the move and the cast were
         # no-ops, so the copy has to be taken here.
-        if moved.data_ptr() == weight.data_ptr():
-            return moved.clone()
-        return moved
+        if borrowed.data_ptr() == weight.data_ptr():
+            return borrowed.clone()
+        return borrowed
 
-    def teacher_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+    def teacher_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Project hidden states through the target's own vocabulary head.
 
         This is what makes an exact full-vocabulary teacher affordable: the buffer
         holds `[T, hidden]` and the `[T, vocab]` logits are regenerated here.
 
         Args:
-            hidden: `[N, hidden_size]` post-norm final hidden states.
+            hidden_states: `[N, hidden_size]` post-norm final hidden states.
 
         Returns:
             `[N, vocab_size]` fp32 logits, computed without gradients.
         """
-        return self._target.compute_logits(hidden.to(self.target_dtype)).float()
+        return self._target_model.compute_logits(
+            hidden_states.to(self.target_dtype)
+        ).float()

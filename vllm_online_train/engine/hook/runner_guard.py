@@ -27,7 +27,7 @@ class RunnerGuard:
         """
         self._lock = threading.Lock()
         self._installed = False
-        self._original: Any = None
+        self._original_init: Any = None
         self._reported = False
 
     @property
@@ -46,14 +46,14 @@ class RunnerGuard:
             if self._installed:
                 return True
 
-            runner = self._runner_class()
-            if runner is None:
+            model_runner_class = self._runner_class()
+            if model_runner_class is None:
                 logger.debug("No V2 model runner in this vLLM; guard not installed")
                 return False
 
-            original = runner.__init__
-            runner.__init__ = self._wrap(original, self._report)
-            self._original = original
+            original_init = model_runner_class.__init__
+            model_runner_class.__init__ = self._wrap(original_init, self._report)
+            self._original_init = original_init
             self._installed = True
             logger.debug("V2 model runner guard installed")
             return True
@@ -64,10 +64,10 @@ class RunnerGuard:
             if not self._installed:
                 return
 
-            runner = self._runner_class()
-            if runner is not None:
-                runner.__init__ = self._original
-            self._original = None
+            model_runner_class = self._runner_class()
+            if model_runner_class is not None:
+                model_runner_class.__init__ = self._original_init
+            self._original_init = None
             self._installed = False
             self._reported = False
             logger.debug("V2 model runner guard uninstalled")
@@ -102,11 +102,11 @@ class RunnerGuard:
         )
 
     @staticmethod
-    def _wrap(original: Any, report: Callable[[], None]) -> Any:
+    def _wrap(original_init: Any, report: Callable[[], None]) -> Any:
         """Build the replacement constructor.
 
         Args:
-            original: The V2 runner's `__init__`.
+            original_init: The V2 runner's `__init__`.
             report: Called before the delegation.
 
         Returns:
@@ -115,9 +115,9 @@ class RunnerGuard:
 
         def runner_init(self, *args: Any, **kwargs: Any) -> None:
             report()
-            original(self, *args, **kwargs)
+            original_init(self, *args, **kwargs)
 
         # Standard-library convention: makes `inspect.signature` and
-        # `inspect.unwrap` resolve through the replacement to `original`.
-        runner_init.__wrapped__ = original
+        # `inspect.unwrap` resolve through the replacement to `original_init`.
+        runner_init.__wrapped__ = original_init
         return runner_init

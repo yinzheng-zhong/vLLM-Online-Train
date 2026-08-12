@@ -8,22 +8,22 @@ class CaptureState:
     """Per-process capture stat."""
 
     def __init__(self) -> None:
-        self.session: TrainingSession | None = None
+        self.training_session: TrainingSession | None = None
         self.disabled = False
         self.reason: str | None = None
 
     @property
     def active(self) -> bool:
         """Whether a session is built and capture is still allowed."""
-        return self.session is not None and not self.disabled
+        return self.training_session is not None and not self.disabled
 
-    def activate(self, session: TrainingSession) -> None:
+    def activate(self, training_session: TrainingSession) -> None:
         """Adopt a built session.
 
         Args:
-            session: The assembled training subsystem.
+            training_session: The assembled training subsystem.
         """
-        self.session = session
+        self.training_session = training_session
         logger.debug("Online training capture state activated")
 
     def disable(self, reason: str, *, exc_info: bool = False) -> None:
@@ -45,9 +45,9 @@ class CaptureState:
 
     def shutdown(self) -> None:
         """Stop the session, if one is running."""
-        if self.session is not None:
-            self.session.stop()
-            self.session = None
+        if self.training_session is not None:
+            self.training_session.stop()
+            self.training_session = None
 
     def reset(self) -> None:
         """Return to the state a fresh process starts in."""

@@ -49,8 +49,8 @@ class EngineShapes:
 class ResolvedConfig:
     """Operator settings paired with the shapes resolved from a live engine."""
 
-    settings: OnlineTrainSettings
-    shapes: EngineShapes
+    online_train_settings: OnlineTrainSettings
+    engine_shapes: EngineShapes
 
     position_decay_gamma: float
     """`ObjectiveSettings.position_decay_gamma`, with `None` replaced by the default
@@ -59,4 +59,7 @@ class ResolvedConfig:
     @property
     def buffer_capacity_bytes(self) -> int:
         """Host memory the full pool would occupy."""
-        return self.settings.buffer.buffer_capacity_tokens * self.shapes.bytes_per_token
+        return (
+            self.online_train_settings.buffer.buffer_capacity_tokens
+            * self.engine_shapes.bytes_per_token
+        )

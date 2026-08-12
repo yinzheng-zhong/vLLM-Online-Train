@@ -34,78 +34,84 @@ class FakeRunnerModule:
 
 
 @pytest.fixture
-def module(monkeypatch) -> FakeRunnerModule:
+def runner_module(monkeypatch) -> FakeRunnerModule:
     """A guard pointed at a fake V2 runner module rather than the installed vLLM."""
-    fake = FakeRunnerModule()
+    fake_module = FakeRunnerModule()
     monkeypatch.setattr(
-        RunnerGuard, "_runner_class", classmethod(lambda cls: fake.GPUModelRunner)
+        RunnerGuard,
+        "_runner_class",
+        classmethod(lambda cls: fake_module.GPUModelRunner),
     )
-    return fake
+    return fake_module
 
 
 @pytest.fixture
-def guard() -> RunnerGuard:
+def runner_guard() -> RunnerGuard:
     return RunnerGuard()
 
 
-def test_reports_once_when_training_is_configured(module, guard, monkeypatch, caplog):
+def test_reports_once_when_training_is_configured(
+    runner_module, runner_guard, monkeypatch, caplog
+):
     monkeypatch.setenv(CONFIG_ENV, "./train.json")
-    guard.install()
+    runner_guard.install()
 
-    module.GPUModelRunner(SimpleNamespace(), "cuda:0")
-    module.GPUModelRunner(SimpleNamespace(), "cuda:0")
+    runner_module.GPUModelRunner(SimpleNamespace(), "cuda:0")
+    runner_module.GPUModelRunner(SimpleNamespace(), "cuda:0")
 
-    errors = [r for r in caplog.records if r.levelname == "ERROR"]
-    assert len(errors) == 1
-    assert RunnerGuard.ENV_VAR in errors[0].getMessage()
+    error_records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(error_records) == 1
+    assert RunnerGuard.ENV_VAR in error_records[0].getMessage()
 
 
 def test_stays_quiet_when_training_is_not_configured(
-    module, guard, monkeypatch, caplog
+    runner_module, runner_guard, monkeypatch, caplog
 ):
     """An installed-but-unconfigured plugin is inert, so a V2 engine is not its
     business to complain about."""
     monkeypatch.delenv(CONFIG_ENV, raising=False)
-    guard.install()
+    runner_guard.install()
 
-    module.GPUModelRunner(SimpleNamespace(), "cuda:0")
+    runner_module.GPUModelRunner(SimpleNamespace(), "cuda:0")
 
     assert [r for r in caplog.records if r.levelname == "ERROR"] == []
 
 
-def test_the_wrapped_constructor_still_builds_the_runner(module, guard, monkeypatch):
+def test_the_wrapped_constructor_still_builds_the_runner(
+    runner_module, runner_guard, monkeypatch
+):
     """The guard reports; it never changes what the engine gets."""
     monkeypatch.setenv(CONFIG_ENV, "./train.json")
-    guard.install()
+    runner_guard.install()
 
-    config = SimpleNamespace()
-    runner = module.GPUModelRunner(config, "cuda:0")
+    vllm_config = SimpleNamespace()
+    model_runner = runner_module.GPUModelRunner(vllm_config, "cuda:0")
 
-    assert runner.vllm_config is config
-    assert runner.device == "cuda:0"
-
-
-def test_install_is_idempotent_and_reversible(module, guard):
-    original = module.GPUModelRunner.__init__
-
-    assert guard.install() is True
-    assert guard.install() is True
-    assert guard.installed
-    assert module.GPUModelRunner.__init__ is not original
-
-    guard.uninstall()
-
-    assert not guard.installed
-    assert module.GPUModelRunner.__init__ is original
+    assert model_runner.vllm_config is vllm_config
+    assert model_runner.device == "cuda:0"
 
 
-def test_install_is_inert_without_a_v2_runner(guard, monkeypatch):
+def test_install_is_idempotent_and_reversible(runner_module, runner_guard):
+    original_init = runner_module.GPUModelRunner.__init__
+
+    assert runner_guard.install() is True
+    assert runner_guard.install() is True
+    assert runner_guard.installed
+    assert runner_module.GPUModelRunner.__init__ is not original_init
+
+    runner_guard.uninstall()
+
+    assert not runner_guard.installed
+    assert runner_module.GPUModelRunner.__init__ is original_init
+
+
+def test_install_is_inert_without_a_v2_runner(runner_guard, monkeypatch):
     """The V2 runner is newer than the oldest vLLM this package runs against."""
     monkeypatch.setattr(RunnerGuard, "_runner_class", classmethod(lambda cls: None))
 
-    assert guard.install() is False
-    assert not guard.installed
-    guard.uninstall()
+    assert runner_guard.install() is False
+    assert not runner_guard.installed
+    runner_guard.uninstall()
 
 
 def test_the_real_module_path_is_the_one_vllm_uses():

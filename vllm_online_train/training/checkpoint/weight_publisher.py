@@ -20,7 +20,9 @@ class WeightPublisher:
     )
     """Tensors `_build_context_kv_buffers` reassigns rather than writes in place."""
 
-    def __init__(self, naming: WeightNameRewriter, weights: HeadWeights) -> None:
+    def __init__(
+        self, weight_name_rewriter: WeightNameRewriter, head_weights: HeadWeights
+    ) -> None:
         """Loads a trained head into the live drafter, preserving buffer addresses.
 
         `DFlashQwen3Model._build_context_kv_buffers` keeps derived tensors beside the
@@ -29,17 +31,17 @@ class WeightPublisher:
         This copies the new values back into the original storages and rebinds them.
 
         Args:
-            naming: Un-fuses the head's parameters into on-disk naming.
-            weights: Exports the head's parameter tree.
+            weight_name_rewriter: Un-fuses the head's parameters into on-disk naming.
+            head_weights: Exports the head's parameter tree.
         """
-        self.naming = naming
-        self.weights = weights
+        self.weight_name_rewriter = weight_name_rewriter
+        self.head_weights = head_weights
 
     def publish(
         self,
         drafter_model: Any,
-        head: TrainableDFlashHead,
-        arch: DFlashHeadArch,
+        draft_head: TrainableDFlashHead,
+        head_arch: DFlashHeadArch,
     ) -> None:
         """Push the trained weights into the running drafter.
 
@@ -48,43 +50,47 @@ class WeightPublisher:
 
         Args:
             drafter_model: The live `DFlashQwen3ForCausalLM`.
-            head: The trained head to publish from.
-            arch: Supplies the split points for on-disk naming.
+            draft_head: The trained head to publish from.
+            head_arch: Supplies the split points for on-disk naming.
 
         Raises:
             RuntimeError: If a derived buffer changes shape or dtype across the
                 rebuild, which would mean the two modules have diverged structurally.
         """
-        inner = drafter_model.model
-        serving_dtype = self.infer_dtype(inner)
+        inner_model = drafter_model.model
+        serving_dtype = self.infer_dtype(inner_model)
 
-        before = {name: getattr(inner, name, None) for name in self.DERIVED_BUFFERS}
+        buffers_before = {
+            name: getattr(inner_model, name, None) for name in self.DERIVED_BUFFERS
+        }
 
         tensors = [
             (name, tensor.detach().to(serving_dtype))
-            for name, tensor in self.naming.rewrite(self.weights.export(head), arch)
+            for name, tensor in self.weight_name_rewriter.rewrite(
+                self.head_weights.export(draft_head), head_arch
+            )
         ]
         with torch.inference_mode():
             drafter_model.load_weights(tensors)
 
-        restored = self._restore_addresses(inner, before)
+        restored_names = self._restore_addresses(inner_model, buffers_before)
         logger.info(
             "Published online-trained DFlash weights (%d tensors, dtype %s); "
             "restored addresses for %s",
             len(tensors),
             serving_dtype,
-            ", ".join(restored) or "nothing",
+            ", ".join(restored_names) or "nothing",
         )
 
     @staticmethod
     def _restore_addresses(
-        inner: Any, before: dict[str, torch.Tensor | None]
+        inner_model: Any, buffers_before: dict[str, torch.Tensor | None]
     ) -> list[str]:
         """Copy rebuilt buffers back into their original storages.
 
         Args:
-            inner: The drafter's inner model.
-            before: Buffer name to the tensor held before the load.
+            inner_model: The drafter's inner model.
+            buffers_before: Buffer name to the tensor held before the load.
 
         Returns:
             The names whose addresses were restored.
@@ -92,9 +98,9 @@ class WeightPublisher:
         Raises:
             RuntimeError: If a buffer changed shape or dtype across the rebuild.
         """
-        restored: list[str] = []
-        for name, original in before.items():
-            rebuilt = getattr(inner, name, None)
+        restored_names: list[str] = []
+        for name, original in buffers_before.items():
+            rebuilt = getattr(inner_model, name, None)
             if original is None or rebuilt is None:
                 continue
             if original.data_ptr() == rebuilt.data_ptr():
@@ -108,20 +114,20 @@ class WeightPublisher:
                     "hot."
                 )
             original.copy_(rebuilt)
-            setattr(inner, name, original)
-            restored.append(name)
-        return restored
+            setattr(inner_model, name, original)
+            restored_names.append(name)
+        return restored_names
 
     @staticmethod
-    def infer_dtype(inner: Any) -> torch.dtype:
+    def infer_dtype(inner_model: Any) -> torch.dtype:
         """The dtype the drafter's parameters hold.
 
         Args:
-            inner: The drafter's inner model.
+            inner_model: The drafter's inner model.
 
         Returns:
             The first parameter's dtype, or bfloat16 when it has none.
         """
-        for parameter in inner.parameters():
+        for parameter in inner_model.parameters():
             return parameter.dtype
         return torch.bfloat16

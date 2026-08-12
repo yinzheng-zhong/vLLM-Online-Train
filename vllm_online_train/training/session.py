@@ -11,45 +11,51 @@ logger = init_logger(__name__)
 class OnlineTrainSession:
     def __init__(
         self,
-        manager: OnlineTrainManager,
-        gate: IdleGate,
-        thread: TrainerThread,
-        sink: MetricsSink,
+        online_train_manager: OnlineTrainManager,
+        idle_gate: IdleGate,
+        trainer_thread: TrainerThread,
+        metrics_sink: MetricsSink,
     ) -> None:
         """One handle over everything the capture hook drives.
 
         Args:
-            manager: Owns the capture, the pool, the head and the optimizer.
-            gate: Records engine steps and decides when training may run.
-            thread: Polls the gate and runs micro-batches.
-            sink: Receives the metric records.
+            online_train_manager: Owns the capture, the pool, the head and the
+                optimizer.
+            idle_gate: Records engine steps and decides when training may run.
+            trainer_thread: Polls the gate and runs micro-batches.
+            metrics_sink: Receives the metric records.
         """
-        self.manager = manager
-        self.gate = gate
-        self.thread = thread
-        self.sink = sink
+        self.online_train_manager = online_train_manager
+        self.idle_gate = idle_gate
+        self.trainer_thread = trainer_thread
+        self.metrics_sink = metrics_sink
 
     def start(self) -> None:
         """Start the trainer thread and record the run's shapes."""
-        self.thread.start()
-        shapes = self.manager.config.shapes
-        settings = self.manager.config.settings
+        self.trainer_thread.start()
+        resolved_config = self.online_train_manager.resolved_config
+        engine_shapes = resolved_config.engine_shapes
+        online_train_settings = resolved_config.online_train_settings
+        buffer_capacity_tokens = (
+            online_train_settings.buffer.buffer_capacity_tokens
+        )
+        publish_mode = online_train_settings.publish.publish_mode
         logger.debug(
             "Starting online train session (block_size=%d, buffer_capacity_tokens=%d, "
             "publish_mode=%s)",
-            shapes.block_size,
-            settings.buffer.buffer_capacity_tokens,
-            settings.publish.publish_mode,
+            engine_shapes.block_size,
+            buffer_capacity_tokens,
+            publish_mode,
         )
-        self.sink.write(
+        self.metrics_sink.write(
             "start",
             {
-                "features": shapes.num_features,
-                "aux_layer_ids": list(shapes.aux_layer_ids),
-                "block_size": shapes.block_size,
-                "bytes_per_token": shapes.bytes_per_token,
-                "buffer_capacity_tokens": settings.buffer.buffer_capacity_tokens,
-                "publish_mode": settings.publish.publish_mode,
+                "features": engine_shapes.num_features,
+                "aux_layer_ids": list(engine_shapes.aux_layer_ids),
+                "block_size": engine_shapes.block_size,
+                "bytes_per_token": engine_shapes.bytes_per_token,
+                "buffer_capacity_tokens": buffer_capacity_tokens,
+                "publish_mode": publish_mode,
             },
         )
 
@@ -59,18 +65,18 @@ class OnlineTrainSession:
         Args:
             num_scheduled_tokens: Tokens that step scheduled.
         """
-        self.gate.note_step(num_scheduled_tokens)
+        self.idle_gate.note_step(num_scheduled_tokens)
 
-    def observe(self, step: EngineStep) -> None:
+    def observe(self, engine_step: EngineStep) -> None:
         """Tee one engine step's activations.
 
         Args:
-            step: The engine step's schedule and activations.
+            engine_step: The engine step's schedule and activations.
         """
-        self.manager.observe(step)
+        self.online_train_manager.observe(engine_step)
 
     def stop(self) -> None:
         """Stop the trainer thread and release the metrics sink."""
         logger.debug("Stopping online train session")
-        self.thread.stop()
-        self.sink.close()
+        self.trainer_thread.stop()
+        self.metrics_sink.close()

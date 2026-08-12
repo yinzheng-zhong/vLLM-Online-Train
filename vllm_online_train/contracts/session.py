@@ -15,11 +15,11 @@ class TrainingSession(Protocol):
         """
         ...
 
-    def observe(self, step: EngineStep) -> None:
+    def observe(self, engine_step: EngineStep) -> None:
         """Tee one engine step's activations.
 
         Args:
-            step: The engine step's schedule and activations.
+            engine_step: The engine step's schedule and activations.
         """
         ...
 

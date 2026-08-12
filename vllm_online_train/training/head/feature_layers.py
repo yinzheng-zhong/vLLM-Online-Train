@@ -35,9 +35,9 @@ class TargetLayerPlanner:
         if num_features == 1:
             return [1]
 
-        top = self._highest_id(num_target_layers, num_features)
-        stride = max((top - 1) // (num_features - 1), 1)
-        layer_ids = [1 + i * stride for i in range(num_features)]
+        highest_id = self._highest_id(num_target_layers, num_features)
+        stride = max((highest_id - 1) // (num_features - 1), 1)
+        layer_ids = [1 + index * stride for index in range(num_features)]
         logger.debug(
             "Placed %d feature layers with stride %d: %s",
             num_features,
@@ -53,14 +53,14 @@ class TargetLayerPlanner:
         Raises:
             ValueError: If even the relaxed cutoff cannot fit `num_features` ids.
         """
-        top = min(max(num_target_layers - 3, 1), num_target_layers - 1)
-        if num_features > top:
-            top = num_target_layers - 1
-        if num_features > top:
+        highest_id = min(max(num_target_layers - 3, 1), num_target_layers - 1)
+        if num_features > highest_id:
+            highest_id = num_target_layers - 1
+        if num_features > highest_id:
             raise ValueError(
                 f"cannot place {num_features} distinct feature layers in a "
-                f"{num_target_layers}-layer target: ids must lie in [1, {top}] so "
-                "that vLLM's +1 into aux numbering stays inside the model. Reduce "
+                f"{num_target_layers}-layer target: ids must lie in [1, {highest_id}] "
+                "so that vLLM's +1 into aux numbering stays inside the model. Reduce "
                 "--features."
             )
-        return top
+        return highest_id

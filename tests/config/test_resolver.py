@@ -23,22 +23,22 @@ def test_resolve_applies_the_dflash_aux_layer_offset():
 
     Reading the raw ids would capture layers one shallower than the drafter is fed.
     """
-    config = config_resolver.resolve(
+    resolved_config = config_resolver.resolve(
         fake_vllm_config(target_layer_ids=[2, 18, 33]), make_settings()
     )
-    assert config.shapes.aux_layer_ids == (3, 19, 34)
+    assert resolved_config.engine_shapes.aux_layer_ids == (3, 19, 34)
 
 
 def test_resolve_derives_shapes():
-    config = config_resolver.resolve(
+    resolved_config = config_resolver.resolve(
         fake_vllm_config(num_speculative_tokens=15), make_settings()
     )
-    shapes = config.shapes
+    engine_shapes = resolved_config.engine_shapes
     # K = num_speculative_tokens + 1: one anchor slot plus one slot per draft token.
-    assert shapes.block_size == 16
-    assert shapes.num_draft_tokens == 15
-    assert shapes.num_features == NUM_FEATURES
-    assert shapes.feature_width == NUM_FEATURES * HIDDEN
+    assert engine_shapes.block_size == 16
+    assert engine_shapes.num_draft_tokens == 15
+    assert engine_shapes.num_features == NUM_FEATURES
+    assert engine_shapes.feature_width == NUM_FEATURES * HIDDEN
 
 
 def test_resolve_rejects_non_dflash_methods():
@@ -72,10 +72,10 @@ def test_resolve_rejects_zero_speculative_tokens():
 
 def test_resolve_rejects_feature_width_mismatch():
     """A hidden size the drafter's `fc` cannot consume means an incompatible pair."""
-    engine = fake_vllm_config(target_layer_ids=[0, 1, 2])
-    engine.model_config.get_hidden_size = lambda: HIDDEN * 2
+    vllm_config = fake_vllm_config(target_layer_ids=[0, 1, 2])
+    vllm_config.model_config.get_hidden_size = lambda: HIDDEN * 2
     with pytest.raises(ValueError, match="fc expects"):
-        config_resolver.resolve(engine, make_settings())
+        config_resolver.resolve(vllm_config, make_settings())
 
 
 def test_resolve_rejects_a_rollout_bound_below_the_block():
@@ -87,47 +87,52 @@ def test_resolve_rejects_a_rollout_bound_below_the_block():
 
 
 def test_resolve_defaults_gamma_from_block_size():
-    config = config_resolver.resolve(
+    resolved_config = config_resolver.resolve(
         fake_vllm_config(num_speculative_tokens=15),
         make_settings(position_decay_gamma=None),
     )
-    assert config.position_decay_gamma == pytest.approx(7.0)
+    assert resolved_config.position_decay_gamma == pytest.approx(7.0)
 
 
 def test_resolve_honours_explicit_gamma_zero():
     """0 must survive resolution as "uniform mean", not be treated as unset."""
-    config = config_resolver.resolve(
+    resolved_config = config_resolver.resolve(
         fake_vllm_config(), make_settings(position_decay_gamma=0.0)
     )
-    assert config.position_decay_gamma == 0.0
+    assert resolved_config.position_decay_gamma == 0.0
 
 
 def test_resolve_falls_back_to_the_engine_attribute():
     """Nothing sets `online_train_config` unless this subsystem is in-tree, but the
     attribute is honoured when present."""
-    settings = make_settings(idle_ms=33.0)
-    config = config_resolver.resolve(fake_vllm_config(settings=settings))
-    assert config.settings.gate.idle_ms == 33.0
+    online_train_settings = make_settings(idle_ms=33.0)
+    resolved_config = config_resolver.resolve(
+        fake_vllm_config(online_train_settings=online_train_settings)
+    )
+    assert resolved_config.online_train_settings.gate.idle_ms == 33.0
 
 
 def test_feature_dtype_follows_the_model_by_default():
-    config = config_resolver.resolve(fake_vllm_config(), make_settings())
-    assert config.shapes.feature_dtype == torch.float32
+    resolved_config = config_resolver.resolve(fake_vllm_config(), make_settings())
+    assert resolved_config.engine_shapes.feature_dtype == torch.float32
 
 
 def test_feature_dtype_can_be_overridden():
-    config = config_resolver.resolve(
+    resolved_config = config_resolver.resolve(
         fake_vllm_config(), make_settings(feature_dtype="bfloat16")
     )
-    assert config.shapes.feature_dtype == torch.bfloat16
+    assert resolved_config.engine_shapes.feature_dtype == torch.bfloat16
 
 
 def test_bytes_per_token_covers_features_and_final_hidden():
-    config = make_config()
-    shapes = config.shapes
-    item = torch.empty((), dtype=shapes.feature_dtype).element_size()
-    expected = (shapes.feature_width + shapes.hidden_size) * item + 4
-    assert shapes.bytes_per_token == expected
-    assert config.buffer_capacity_bytes == (
-        config.settings.buffer.buffer_capacity_tokens * expected
+    resolved_config = make_config()
+    engine_shapes = resolved_config.engine_shapes
+    item_size = torch.empty((), dtype=engine_shapes.feature_dtype).element_size()
+    expected_bytes = (
+        engine_shapes.feature_width + engine_shapes.hidden_size
+    ) * item_size + 4
+    assert engine_shapes.bytes_per_token == expected_bytes
+    assert resolved_config.buffer_capacity_bytes == (
+        resolved_config.online_train_settings.buffer.buffer_capacity_tokens
+        * expected_bytes
     )

@@ -53,11 +53,12 @@ class StateProvider(Protocol):
         """
         ...
 
-    def teacher_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+    def teacher_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Project hidden states through the target's own vocabulary head.
 
         Args:
-            hidden: `[N, hidden_size]` post-norm final hidden states, on `device`.
+            hidden_states: `[N, hidden_size]` post-norm final hidden states, on
+                `device`.
 
         Returns:
             `[N, vocab_size]` fp32 logits, computed without gradients.

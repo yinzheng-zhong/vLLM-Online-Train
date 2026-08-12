@@ -55,13 +55,13 @@ class ArchFactory:
     value via `set_default_rope_theta`, and the two must agree."""
 
     def create(
-        self, vllm_config: "VllmConfig", shapes: EngineShapes
+        self, vllm_config: "VllmConfig", engine_shapes: EngineShapes
     ) -> DFlashHeadArch:
         """Build the arch of the head the engine is serving.
 
         Args:
             vllm_config: The engine config, for the draft model's `hf_config`.
-            shapes: Supplies the feature count, block size and mask token.
+            engine_shapes: Supplies the feature count, block size and mask token.
 
         Returns:
             The head's shape.
@@ -78,13 +78,13 @@ class ArchFactory:
             num_heads=num_heads,
             num_kv_heads=int(getattr(hf_config, "num_key_value_heads", num_heads)),
             head_dim=head_dim,
-            num_features=shapes.num_features,
-            block_size=shapes.block_size,
+            num_features=engine_shapes.num_features,
+            block_size=engine_shapes.block_size,
             vocab_size=int(hf_config.vocab_size),
             draft_vocab_size=int(
                 getattr(hf_config, "draft_vocab_size", None) or hf_config.vocab_size
             ),
-            mask_token_id=shapes.mask_token_id,
+            mask_token_id=engine_shapes.mask_token_id,
             rms_norm_eps=float(getattr(hf_config, "rms_norm_eps", 1e-6)),
             rope_theta=self.rope_theta(hf_config),
             attention_bias=bool(getattr(hf_config, "attention_bias", False)),
@@ -101,7 +101,7 @@ class ArchFactory:
             The declared base, else `DEFAULT_ROPE_THETA`.
         """
         rope_parameters = getattr(hf_config, "rope_parameters", None) or {}
-        theta = rope_parameters.get("rope_theta") or getattr(
+        declared_theta = rope_parameters.get("rope_theta") or getattr(
             hf_config, "rope_theta", None
         )
-        return float(theta or cls.DEFAULT_ROPE_THETA)
+        return float(declared_theta or cls.DEFAULT_ROPE_THETA)

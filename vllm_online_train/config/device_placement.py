@@ -9,13 +9,13 @@ class DevicePlacement:
     """Turns `placement.train_device` into the device the head trains on."""
 
     def resolve(
-        self, requested: str | None, engine_device: torch.device
+        self, requested_device: str | None, engine_device: torch.device
     ) -> torch.device:
         """Name the device the head, its optimizer and its batches occupy.
 
         Args:
-            requested: The `train_device` setting, e.g. `"cuda:1"`. `None` selects the
-                engine's own device.
+            requested_device: The `train_device` setting, e.g. `"cuda:1"`. `None`
+                selects the engine's own device.
             engine_device: The device the engine serves on.
 
         Returns:
@@ -27,33 +27,39 @@ class DevicePlacement:
             ValueError: If the string names no device, or names a CUDA index this
                 process cannot see.
         """
-        if requested is None:
+        if requested_device is None:
             logger.debug(
                 "No train_device set; training on engine device %s", engine_device
             )
             return engine_device
 
-        device = self._parse(requested)
-        if device.index is None:
-            resolved = engine_device if device.type == engine_device.type else device
+        train_device = self._parse(requested_device)
+        if train_device.index is None:
+            resolved_device = (
+                engine_device
+                if train_device.type == engine_device.type
+                else train_device
+            )
             logger.debug(
                 "train_device=%r carries no index; resolved to %s",
-                requested,
-                resolved,
+                requested_device,
+                resolved_device,
             )
-            return resolved
-        self._check_visible(device)
+            return resolved_device
+        self._check_visible(train_device)
         logger.debug(
-            "train_device=%r resolved to explicit device %s", requested, device
+            "train_device=%r resolved to explicit device %s",
+            requested_device,
+            train_device,
         )
-        return device
+        return train_device
 
     @staticmethod
-    def _parse(requested: str) -> torch.device:
+    def _parse(requested_device: str) -> torch.device:
         """Read one device string.
 
         Args:
-            requested: The `train_device` setting.
+            requested_device: The `train_device` setting.
 
         Returns:
             The device it names.
@@ -62,29 +68,29 @@ class DevicePlacement:
             ValueError: If it names no device.
         """
         try:
-            return torch.device(requested)
+            return torch.device(requested_device)
         except (RuntimeError, TypeError) as exc:
             raise ValueError(
-                f"train_device={requested!r} does not name a device: {exc}"
+                f"train_device={requested_device!r} does not name a device: {exc}"
             ) from exc
 
     @staticmethod
-    def _check_visible(device: torch.device) -> None:
+    def _check_visible(train_device: torch.device) -> None:
         """Check that a CUDA index is within this process's device count.
 
         Args:
-            device: An indexed device.
+            train_device: An indexed device.
 
         Raises:
             ValueError: If the index is out of range.
         """
-        if device.type != "cuda":
+        if train_device.type != "cuda":
             return
-        count = torch.cuda.device_count()
-        if device.index >= count:
+        visible_device_count = torch.cuda.device_count()
+        if train_device.index >= visible_device_count:
             raise ValueError(
-                f"train_device={str(device)!r} but this process can see {count} CUDA "
-                "device(s), numbered from 0. CUDA_VISIBLE_DEVICES narrows and "
-                "renumbers what the plugin sees, and vLLM sets it per process for "
-                "data-parallel deployments."
+                f"train_device={str(train_device)!r} but this process can see "
+                f"{visible_device_count} CUDA device(s), numbered from 0. "
+                "CUDA_VISIBLE_DEVICES narrows and renumbers what the plugin sees, and "
+                "vLLM sets it per process for data-parallel deployments."
             )

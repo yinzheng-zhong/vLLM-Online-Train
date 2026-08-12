@@ -12,10 +12,10 @@ import pytest
 
 from vllm_online_train.engine.hook import capture_hook
 
-capture_state = capture_hook.state
-signature_guard = capture_hook.patcher.guard
+capture_state = capture_hook.capture_state
+signature_guard = capture_hook.method_patcher.signature_guard
 
-CONFIG_ENV = capture_hook.loader.CONFIG_ENV
+CONFIG_ENV = capture_hook.settings_loader.CONFIG_ENV
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def test_rejects_a_reordered_signature():
     """Reordering is the dangerous drift: every argument still binds, and capture
     would read `hidden_states` out of whatever now sits in that position."""
 
-    def mutated(
+    def mutated_method(
         self,
         scheduler_output,
         sampled_token_ids,
@@ -52,11 +52,11 @@ def test_rejects_a_reordered_signature():
         return None
 
     with pytest.raises(RuntimeError, match="signature has changed"):
-        signature_guard.check(mutated)
+        signature_guard.check(mutated_method)
 
 
 def test_rejects_a_renamed_or_dropped_parameter():
-    def mutated(
+    def mutated_method(
         self,
         scheduler_output,
         sampled_token_ids,
@@ -70,18 +70,18 @@ def test_rejects_a_renamed_or_dropped_parameter():
         return None
 
     with pytest.raises(RuntimeError, match="signature has changed"):
-        signature_guard.check(mutated)
+        signature_guard.check(mutated_method)
 
 
 def test_refuses_to_install_over_a_mutated_method(monkeypatch):
     """A loud startup failure, not a silent bad capture."""
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-    def mutated(self, scheduler_output, sampled_token_ids):
+    def mutated_method(self, scheduler_output, sampled_token_ids):
         return None
 
     monkeypatch.setattr(
-        GPUModelRunner, "propose_draft_token_ids", mutated, raising=True
+        GPUModelRunner, "propose_draft_token_ids", mutated_method, raising=True
     )
     with pytest.raises(RuntimeError, match="signature has changed"):
         capture_hook.install()
@@ -93,16 +93,16 @@ def test_install_is_idempotent_and_reversible():
     `models/registry`, so it must be safe to call repeatedly."""
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-    original = GPUModelRunner.propose_draft_token_ids
+    original_method = GPUModelRunner.propose_draft_token_ids
     assert capture_hook.install()
-    patched = GPUModelRunner.propose_draft_token_ids
-    assert patched is not original
+    patched_method = GPUModelRunner.propose_draft_token_ids
+    assert patched_method is not original_method
 
     assert capture_hook.install()
-    assert GPUModelRunner.propose_draft_token_ids is patched, "double-wrapped"
+    assert GPUModelRunner.propose_draft_token_ids is patched_method, "double-wrapped"
 
     capture_hook.uninstall()
-    assert GPUModelRunner.propose_draft_token_ids is original
+    assert GPUModelRunner.propose_draft_token_ids is original_method
     assert not capture_hook.installed
 
 
@@ -129,13 +129,13 @@ def test_register_does_not_import_the_training_stack():
         " 'vllm_online_train.engine.state.engine'))];"
         "print(heavy)"
     )
-    result = subprocess.run(
+    completed = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
     )
-    assert result.returncode == 0, result.stderr
+    assert completed.returncode == 0, completed.stderr
     # `register()` logs its banner to the same stream, so only the last line is the
     # script's own output.
-    assert result.stdout.strip().splitlines()[-1] == "[]", result.stdout
+    assert completed.stdout.strip().splitlines()[-1] == "[]", completed.stdout
 
 
 def test_wrapper_keeps_the_signature_it_asserted():
@@ -150,23 +150,25 @@ def test_wrapper_keeps_the_signature_it_asserted():
 def test_the_wrapper_exposes_the_original():
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-    original = GPUModelRunner.propose_draft_token_ids
+    original_method = GPUModelRunner.propose_draft_token_ids
     capture_hook.install()
-    assert GPUModelRunner.propose_draft_token_ids.__wrapped__ is original
+    assert GPUModelRunner.propose_draft_token_ids.__wrapped__ is original_method
 
 
-def runner(method: str = "dflash", **kwargs) -> SimpleNamespace:
-    spec = SimpleNamespace(method=method, use_dflash=lambda: method == "dflash")
+def make_runner(method: str = "dflash", **kwargs) -> SimpleNamespace:
+    speculative_config = SimpleNamespace(
+        method=method, use_dflash=lambda: method == "dflash"
+    )
     return SimpleNamespace(
-        vllm_config=SimpleNamespace(speculative_config=spec),
+        vllm_config=SimpleNamespace(speculative_config=speculative_config),
         input_batch=SimpleNamespace(req_ids=[]),
         **kwargs,
     )
 
 
-def observe(target) -> None:
+def observe(model_runner) -> None:
     capture_hook.observe(
-        target,
+        model_runner,
         SimpleNamespace(total_num_scheduled_tokens=4),
         None,
         None,
@@ -177,21 +179,21 @@ def observe(target) -> None:
 
 def test_unset_config_disables_on_a_dflash_engine(monkeypatch):
     monkeypatch.delenv(CONFIG_ENV, raising=False)
-    observe(runner())
+    observe(make_runner())
     assert capture_state.disabled
     assert CONFIG_ENV in capture_state.reason
 
 
 def test_a_disabled_config_disables_the_hook(monkeypatch):
     monkeypatch.setenv(CONFIG_ENV, json.dumps({"enabled": False}))
-    observe(runner())
+    observe(make_runner())
     assert capture_state.disabled
     assert "enabled=false" in capture_state.reason
 
 
 def test_an_unreadable_config_disables_without_raising(monkeypatch):
     monkeypatch.setenv(CONFIG_ENV, "{not json")
-    observe(runner())
+    observe(make_runner())
     assert capture_state.disabled
     assert CONFIG_ENV in capture_state.reason
 
@@ -204,7 +206,7 @@ def test_a_declining_assembler_disables(monkeypatch):
         "vllm_online_train.assembler.SessionAssembler",
         lambda: SimpleNamespace(build=lambda *_: None),
     )
-    observe(runner(method="eagle3"))
+    observe(make_runner(method="eagle3"))
     assert capture_state.disabled
     assert "declined" in capture_state.reason
 
@@ -221,12 +223,12 @@ def test_a_raising_observe_disables_capture_instead_of_the_engine(monkeypatch):
             pass
 
     capture_state.activate(Exploding())
-    observe(runner())
+    observe(make_runner())
     assert capture_state.disabled
     assert "boom" in capture_state.reason
 
     # And it stays disabled: one log, then a cheap flag check per step.
-    observe(runner())
+    observe(make_runner())
 
 
 def test_disabled_state_short_circuits():
@@ -240,8 +242,8 @@ def test_disabled_state_short_circuits():
         def stop(self):
             pass
 
-    capture_state.session = Counting()
-    observe(runner())
+    capture_state.training_session = Counting()
+    observe(make_runner())
     assert calls == []
 
 
@@ -258,7 +260,7 @@ def test_disable_stops_the_session():
     capture_state.activate(Session())
     capture_state.disable("test")
     assert stopped == [True]
-    assert capture_state.session is None
+    assert capture_state.training_session is None
 
 
 def test_disable_is_idempotent():

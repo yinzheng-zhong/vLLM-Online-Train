@@ -13,7 +13,10 @@ class MirroredStateProvider:
     as a fraction of the engine's largest logit."""
 
     def __init__(
-        self, source: StateProvider, device: torch.device, dtype: torch.dtype
+        self,
+        source_provider: StateProvider,
+        device: torch.device,
+        dtype: torch.dtype,
     ) -> None:
         """Serves the borrowed target state from a device other than the engine's.
 
@@ -22,13 +25,13 @@ class MirroredStateProvider:
         device. The wrapped provider stays the only holder of the target handle.
 
         Args:
-            source: Holds the target handle, on the engine's device.
+            source_provider: Holds the target handle, on the engine's device.
             device: Where the head trains.
             dtype: Precision the mirrored vocabulary projection is held at.
         """
-        self._source = source
+        self._source_provider = source_provider
         self._device = device
-        self._projection = source.lm_head_weight(device, dtype)
+        self._projection = source_provider.lm_head_weight(device, dtype)
         logger.debug(
             "mirrored state provider built on %s at %s", device, self._projection.dtype
         )
@@ -41,12 +44,12 @@ class MirroredStateProvider:
     @property
     def target_dtype(self) -> torch.dtype:
         """The target's parameter dtype."""
-        return self._source.target_dtype
+        return self._source_provider.target_dtype
 
     @property
     def serving_dtype(self) -> torch.dtype:
         """The dtype the engine is configured to serve at."""
-        return self._source.serving_dtype
+        return self._source_provider.serving_dtype
 
     @property
     def projection_dtype(self) -> torch.dtype:
@@ -67,7 +70,7 @@ class MirroredStateProvider:
         Returns:
             `[vocab, hidden]` at `dtype`.
         """
-        return self._source.embedding_weight(device or self._device, dtype)
+        return self._source_provider.embedding_weight(device or self._device, dtype)
 
     def lm_head_weight(
         self,
@@ -83,25 +86,27 @@ class MirroredStateProvider:
         Returns:
             `[vocab, hidden]` at `dtype`.
         """
-        return self._source.lm_head_weight(device or self._device, dtype)
+        return self._source_provider.lm_head_weight(device or self._device, dtype)
 
-    def teacher_logits(self, hidden: torch.Tensor) -> torch.Tensor:
+    def teacher_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Project hidden states through the mirrored copy of the target's head.
 
         Args:
-            hidden: `[N, hidden_size]` post-norm final hidden states, on the training
-                device.
+            hidden_states: `[N, hidden_size]` post-norm final hidden states, on the
+                training device.
 
         Returns:
             `[N, vocab_size]` fp32 logits.
         """
-        return F.linear(hidden.to(self._projection.dtype), self._projection).float()
+        return F.linear(
+            hidden_states.to(self._projection.dtype), self._projection
+        ).float()
 
-    def verify_parity(self, rows: int = 4) -> float:
+    def verify_parity(self, num_rows: int = 4) -> float:
         """Score the same states through both projections and compare.
 
         Args:
-            rows: Hidden states to probe with.
+            num_rows: Hidden states to probe with.
 
         Returns:
             The largest deviation, as a fraction of the engine's largest logit.
@@ -111,16 +116,20 @@ class MirroredStateProvider:
                 `PARITY_TOLERANCE`.
         """
         generator = torch.Generator().manual_seed(0)
-        hidden = torch.randn(
-            rows,
+        hidden_states = torch.randn(
+            num_rows,
             self._projection.shape[1],
             generator=generator,
             dtype=torch.float32,
         )
         with torch.no_grad():
-            engine = self._source.teacher_logits(hidden.to(self._source.device))
-            mirrored = self.teacher_logits(hidden.to(self._device)).to(engine.device)
-            deviation = self._deviation(mirrored, engine)
+            engine_logits = self._source_provider.teacher_logits(
+                hidden_states.to(self._source_provider.device)
+            )
+            mirrored_logits = self.teacher_logits(
+                hidden_states.to(self._device)
+            ).to(engine_logits.device)
+            deviation = self._deviation(mirrored_logits, engine_logits)
 
         if deviation > self.PARITY_TOLERANCE:
             raise ValueError(
@@ -134,12 +143,14 @@ class MirroredStateProvider:
         return deviation
 
     @staticmethod
-    def _deviation(mirrored: torch.Tensor, engine: torch.Tensor) -> float:
+    def _deviation(
+        mirrored_logits: torch.Tensor, engine_logits: torch.Tensor
+    ) -> float:
         """Compare two sets of logits for the same states.
 
         Args:
-            mirrored: `[N, vocab]` from the mirrored projection.
-            engine: `[N, vocab]` from the engine's own projection.
+            mirrored_logits: `[N, vocab]` from the mirrored projection.
+            engine_logits: `[N, vocab]` from the engine's own projection.
 
         Returns:
             The largest absolute difference, as a fraction of the engine's largest
@@ -148,12 +159,13 @@ class MirroredStateProvider:
         Raises:
             ValueError: If the two disagree in shape.
         """
-        if mirrored.shape != engine.shape:
+        if mirrored_logits.shape != engine_logits.shape:
             raise ValueError(
-                f"the mirrored projection yields {tuple(mirrored.shape)} logits where "
-                f"the engine's own yields {tuple(engine.shape)}. Leave train_device "
-                "unset to score the teacher through the engine's projection instead."
+                f"the mirrored projection yields {tuple(mirrored_logits.shape)} logits "
+                f"where the engine's own yields {tuple(engine_logits.shape)}. Leave "
+                "train_device unset to score the teacher through the engine's "
+                "projection instead."
             )
 
-        scale = engine.abs().amax().clamp_min(1.0)
-        return float((mirrored - engine).abs().amax() / scale)
+        scale = engine_logits.abs().amax().clamp_min(1.0)
+        return float((mirrored_logits - engine_logits).abs().amax() / scale)

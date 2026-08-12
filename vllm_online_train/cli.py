@@ -94,28 +94,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def to_request(args: argparse.Namespace) -> InitHeadRequest:
+def to_request(parsed_args: argparse.Namespace) -> InitHeadRequest:
     """Turn the parsed namespace into the typed request `head/` consumes.
 
     Args:
-        args: The parsed command line.
+        parsed_args: The parsed command line.
 
     Returns:
         The request.
     """
     return InitHeadRequest(
-        target=args.target,
-        layers=args.layers,
-        features=args.features,
-        block_size=args.block_size,
-        target_layer_ids=args.target_layer_ids,
-        mask_token_id=args.mask_token_id,
-        hidden_size=args.hidden_size,
-        intermediate_size=args.intermediate_size,
-        num_heads=args.num_heads,
-        num_kv_heads=args.num_kv_heads,
-        head_dim=args.head_dim,
-        rope_theta=args.rope_theta,
+        target=parsed_args.target,
+        layers=parsed_args.layers,
+        features=parsed_args.features,
+        block_size=parsed_args.block_size,
+        target_layer_ids=parsed_args.target_layer_ids,
+        mask_token_id=parsed_args.mask_token_id,
+        hidden_size=parsed_args.hidden_size,
+        intermediate_size=parsed_args.intermediate_size,
+        num_heads=parsed_args.num_heads,
+        num_kv_heads=parsed_args.num_kv_heads,
+        head_dim=parsed_args.head_dim,
+        rope_theta=parsed_args.rope_theta,
     )
 
 
@@ -132,76 +132,85 @@ def main(argv: list[str] | None = None) -> int:
         SystemExit: On an invalid argument, an existing checkpoint without --force,
             or a target the head cannot be built against.
     """
-    args = parse_args(argv)
-    if args.layers < 1:
-        raise SystemExit(f"--layers must be >= 1, got {args.layers}")
-    if args.block_size < 2:
+    parsed_args = parse_args(argv)
+    if parsed_args.layers < 1:
+        raise SystemExit(f"--layers must be >= 1, got {parsed_args.layers}")
+    if parsed_args.block_size < 2:
         raise SystemExit(
             f"--block-size must be >= 2 so a block has at least one predicted slot "
-            f"beside the anchor, got {args.block_size}"
+            f"beside the anchor, got {parsed_args.block_size}"
         )
 
-    weights = HeadWeights()
-    writer = CheckpointWriter(WeightNameRewriter())
-    factory = HeadFactory(BlockMaskBuilder(), weights)
-    planner = InitHeadPlanner(TargetLayerPlanner(), ArchFactory())
+    head_weights = HeadWeights()
+    checkpoint_writer = CheckpointWriter(WeightNameRewriter())
+    head_factory = HeadFactory(BlockMaskBuilder(), head_weights)
+    init_head_planner = InitHeadPlanner(TargetLayerPlanner(), ArchFactory())
 
-    out = Path(args.out)
-    if (out / writer.WEIGHTS_FILENAME).exists() and not args.force:
-        raise SystemExit(f"{out} already holds a checkpoint; pass --force to replace.")
+    out_dir = Path(parsed_args.out)
+    weights_path = out_dir / checkpoint_writer.WEIGHTS_FILENAME
+    if weights_path.exists() and not parsed_args.force:
+        raise SystemExit(
+            f"{out_dir} already holds a checkpoint; pass --force to replace."
+        )
 
     try:
-        plan = planner.plan(to_request(args))
+        init_head_plan = init_head_planner.plan(to_request(parsed_args))
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     logger.debug(
         "resolved plan: %d draft layers, target_layer_ids=%s of %d target layers",
-        plan.arch.num_layers,
-        plan.target_layer_ids,
-        plan.num_target_layers,
+        init_head_plan.head_arch.num_layers,
+        init_head_plan.target_layer_ids,
+        init_head_plan.num_target_layers,
     )
 
-    target = plan.target_config
-    config = DraftConfigBuilder().build(
-        plan.arch,
-        target_layer_ids=plan.target_layer_ids,
-        num_target_layers=plan.num_target_layers,
-        dtype=args.dtype,
+    head_arch = init_head_plan.head_arch
+    target_config = init_head_plan.target_config
+    draft_config = DraftConfigBuilder().build(
+        head_arch,
+        target_layer_ids=init_head_plan.target_layer_ids,
+        num_target_layers=init_head_plan.num_target_layers,
+        dtype=parsed_args.dtype,
         max_position_embeddings=int(
-            getattr(target, "max_position_embeddings", None) or 40960
+            getattr(target_config, "max_position_embeddings", None) or 40960
         ),
-        bos_token_id=getattr(target, "bos_token_id", None),
-        eos_token_id=getattr(target, "eos_token_id", None),
+        bos_token_id=getattr(target_config, "bos_token_id", None),
+        eos_token_id=getattr(target_config, "eos_token_id", None),
     )
 
-    generator = torch.Generator().manual_seed(args.seed)
-    head = factory.create(plan.arch, generator=generator)
+    generator = torch.Generator().manual_seed(parsed_args.seed)
+    draft_head = head_factory.create(head_arch, generator=generator)
 
-    logger.debug("writing checkpoint to %s at dtype=%s", out, args.dtype)
-    writer.write(
-        out,
-        weights.export(head),
-        plan.arch,
-        config=config,
-        dtype=DTYPES[args.dtype],
+    logger.debug(
+        "writing checkpoint to %s at dtype=%s", out_dir, parsed_args.dtype
+    )
+    checkpoint_writer.write(
+        out_dir,
+        head_weights.export(draft_head),
+        head_arch,
+        config=draft_config,
+        dtype=DTYPES[parsed_args.dtype],
     )
 
-    arch = plan.arch
-    trained = sum(p.numel() for p in head.trainable_parameters())
+    num_trained_params = sum(
+        parameter.numel() for parameter in draft_head.trainable_parameters()
+    )
     print(
-        f"Wrote {out}\n"
-        f"  draft layers      {arch.num_layers}\n"
-        f"  feature layers    {arch.num_features} (DFlash ids {plan.target_layer_ids}, "
-        f"aux ids {[i + 1 for i in plan.target_layer_ids]})\n"
-        f"  fc width          {arch.feature_width} -> {arch.hidden_size}\n"
-        f"  block size        {arch.block_size} "
-        f"(serve with num_speculative_tokens={arch.block_size - 1})\n"
-        f"  mask_token_id     {arch.mask_token_id}\n"
-        f"  trained params    {trained / 1e6:.1f}M\n"
+        f"Wrote {out_dir}\n"
+        f"  draft layers      {head_arch.num_layers}\n"
+        f"  feature layers    {head_arch.num_features} "
+        f"(DFlash ids {init_head_plan.target_layer_ids}, "
+        f"aux ids {[i + 1 for i in init_head_plan.target_layer_ids]})\n"
+        f"  fc width          {head_arch.feature_width} -> {head_arch.hidden_size}\n"
+        f"  block size        {head_arch.block_size} "
+        f"(serve with num_speculative_tokens={head_arch.block_size - 1})\n"
+        f"  mask_token_id     {head_arch.mask_token_id}\n"
+        f"  trained params    {num_trained_params / 1e6:.1f}M\n"
         f"  capture cost      "
-        f"{(arch.num_features + 1) * arch.hidden_size * 2 / 1024:.0f} KiB/token"
+        f"{(head_arch.num_features + 1) * head_arch.hidden_size * 2 / 1024:.0f} "
+        "KiB/token"
     )
-    print(json.dumps(config["dflash_config"], indent=2))
+    print(json.dumps(draft_config["dflash_config"], indent=2))
     return 0
 
 

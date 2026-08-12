@@ -24,13 +24,13 @@ class ConfigResolver:
     def resolve(
         self,
         vllm_config: "VllmConfig",
-        settings: OnlineTrainSettings | None = None,
+        online_train_settings: OnlineTrainSettings | None = None,
     ) -> ResolvedConfig:
         """Resolve shapes and validate the draft/target pair.
 
         Args:
             vllm_config: The engine config to resolve shapes from.
-            settings: Operator settings. Defaults to
+            online_train_settings: Operator settings. Defaults to
                 `vllm_config.online_train_config`, then to section defaults.
 
         Returns:
@@ -44,12 +44,14 @@ class ConfigResolver:
             get_eagle3_aux_layers_from_config,
         )
 
-        if settings is None:
-            settings = getattr(vllm_config, "online_train_config", None)
-            settings = settings or OnlineTrainSettings()
+        if online_train_settings is None:
+            online_train_settings = (
+                getattr(vllm_config, "online_train_config", None)
+                or OnlineTrainSettings()
+            )
 
-        spec_config = self._require_dflash(vllm_config)
-        aux_layer_ids = get_eagle3_aux_layers_from_config(spec_config)
+        speculative_config = self._require_dflash(vllm_config)
+        aux_layer_ids = get_eagle3_aux_layers_from_config(speculative_config)
         if not aux_layer_ids:
             raise ValueError(
                 "Online training could not resolve the target feature layers. The "
@@ -57,7 +59,7 @@ class ConfigResolver:
                 "dflash_config.layer_ids or eagle_aux_hidden_state_layer_ids."
             )
 
-        dflash_config = self._dflash_config(spec_config)
+        dflash_config = self._dflash_config(speculative_config)
         if not dflash_config.get("use_aux_hidden_state", True):
             raise ValueError(
                 "Online training requires dflash_config.use_aux_hidden_state; without "
@@ -67,31 +69,36 @@ class ConfigResolver:
 
         hidden_size = vllm_config.model_config.get_hidden_size()
         self._check_feature_width(vllm_config, len(aux_layer_ids), hidden_size)
-        block_size = self._resolve_block_size(spec_config, settings)
+        block_size = self._resolve_block_size(
+            speculative_config, online_train_settings
+        )
 
-        shapes = EngineShapes(
+        engine_shapes = EngineShapes(
             aux_layer_ids=tuple(aux_layer_ids),
             hidden_size=hidden_size,
             vocab_size=vllm_config.model_config.get_vocab_size(),
             block_size=block_size,
             mask_token_id=dflash_config.get("mask_token_id") or 0,
-            feature_dtype=self._feature_dtype(vllm_config, settings),
+            feature_dtype=self._feature_dtype(vllm_config, online_train_settings),
         )
-        gamma = settings.objective.position_decay_gamma
-        if gamma is None:
-            gamma = settings.objective.default_gamma(block_size)
+        objective_settings = online_train_settings.objective
+        position_decay_gamma = objective_settings.position_decay_gamma
+        if position_decay_gamma is None:
+            position_decay_gamma = objective_settings.default_gamma(block_size)
 
         logger.debug(
             "Resolved online-train shapes: block_size=%d hidden_size=%d "
             "num_features=%d feature_dtype=%s position_decay_gamma=%.3f",
-            shapes.block_size,
-            shapes.hidden_size,
-            shapes.num_features,
-            shapes.feature_dtype,
-            gamma,
+            engine_shapes.block_size,
+            engine_shapes.hidden_size,
+            engine_shapes.num_features,
+            engine_shapes.feature_dtype,
+            position_decay_gamma,
         )
         return ResolvedConfig(
-            settings=settings, shapes=shapes, position_decay_gamma=gamma
+            online_train_settings=online_train_settings,
+            engine_shapes=engine_shapes,
+            position_decay_gamma=position_decay_gamma,
         )
 
     @staticmethod
@@ -107,20 +114,20 @@ class ConfigResolver:
         Raises:
             ValueError: If the engine is not serving `method: "dflash"`.
         """
-        spec_config = vllm_config.speculative_config
-        if spec_config is None or not spec_config.use_dflash():
+        speculative_config = vllm_config.speculative_config
+        if speculative_config is None or not speculative_config.use_dflash():
             raise ValueError(
                 "Online training requires speculative_config.method == 'dflash'; got "
-                f"{None if spec_config is None else spec_config.method!r}. The "
-                "features the head trains on are a by-product of the DFlash serving "
-                "path, so no other method can supply them."
+                f"{None if speculative_config is None else speculative_config.method!r}"
+                ". The features the head trains on are a by-product of the DFlash "
+                "serving path, so no other method can supply them."
             )
-        return spec_config
+        return speculative_config
 
     @staticmethod
-    def _dflash_config(spec_config: "SpeculativeConfig") -> dict:
+    def _dflash_config(speculative_config: "SpeculativeConfig") -> dict:
         """The draft checkpoint's `dflash_config` block, or an empty mapping."""
-        hf_config = spec_config.draft_model_config.hf_config
+        hf_config = speculative_config.draft_model_config.hf_config
         return getattr(hf_config, "dflash_config", None) or {}
 
     @staticmethod
@@ -146,7 +153,8 @@ class ConfigResolver:
 
     @staticmethod
     def _resolve_block_size(
-        spec_config: "SpeculativeConfig", settings: OnlineTrainSettings
+        speculative_config: "SpeculativeConfig",
+        online_train_settings: OnlineTrainSettings,
     ) -> int:
         """`num_speculative_tokens + 1`, checked against the rollout length bound.
 
@@ -154,14 +162,14 @@ class ConfigResolver:
             ValueError: If a block would have no predicted slot, or no rollout could
                 hold one.
         """
-        block_size = spec_config.num_speculative_tokens + 1
+        block_size = speculative_config.num_speculative_tokens + 1
         if block_size < 2:
             raise ValueError(
                 "Online training needs num_speculative_tokens >= 1 so a block has at "
                 "least one predicted slot beside the anchor; got "
-                f"{spec_config.num_speculative_tokens}."
+                f"{speculative_config.num_speculative_tokens}."
             )
-        max_rollout_tokens = settings.buffer.max_rollout_tokens
+        max_rollout_tokens = online_train_settings.buffer.max_rollout_tokens
         if max_rollout_tokens <= block_size:
             raise ValueError(
                 f"max_rollout_tokens ({max_rollout_tokens}) must exceed the "
@@ -171,10 +179,10 @@ class ConfigResolver:
 
     @classmethod
     def _feature_dtype(
-        cls, vllm_config: "VllmConfig", settings: OnlineTrainSettings
+        cls, vllm_config: "VllmConfig", online_train_settings: OnlineTrainSettings
     ) -> torch.dtype:
         """The configured feature dtype, falling back to the model's."""
-        name = settings.capture.feature_dtype
-        if name is None:
+        feature_dtype_name = online_train_settings.capture.feature_dtype
+        if feature_dtype_name is None:
             return vllm_config.model_config.dtype
-        return cls.FEATURE_DTYPES[name]
+        return cls.FEATURE_DTYPES[feature_dtype_name]

@@ -23,72 +23,74 @@ class WeightNameRewriter:
     def rewrite(
         self,
         named_tensors: Iterable[tuple[str, torch.Tensor]],
-        arch: DFlashHeadArch,
+        head_arch: DFlashHeadArch,
     ) -> Iterator[tuple[str, torch.Tensor]]:
         """Un-fuse the projections and drop the target-bound tensors.
 
         Args:
             named_tensors: Fused-naming pairs, i.e. `HeadWeights.export()`.
-            arch: Supplies the split points.
+            head_arch: Supplies the split points.
 
         Yields:
             One `(name, tensor)` pair per on-disk tensor.
         """
         logger.debug(
             "Rewriting fused head weights: q_size=%d, kv_size=%d, intermediate_size=%d",
-            arch.q_size,
-            arch.kv_size,
-            arch.intermediate_size,
+            head_arch.q_size,
+            head_arch.kv_size,
+            head_arch.intermediate_size,
         )
         for name, tensor in named_tensors:
-            if any(shared in name for shared in self.SHARED_WITH_TARGET):
+            if any(shared_name in name for shared_name in self.SHARED_WITH_TARGET):
                 continue
 
             if name.endswith(("qkv_proj.weight", "qkv_proj.bias")):
-                yield from self._split_qkv(name, tensor, arch)
+                yield from self._split_qkv(name, tensor, head_arch)
             elif name.endswith("gate_up_proj.weight"):
-                yield from self._split_gate_up(name, tensor, arch)
+                yield from self._split_gate_up(name, tensor, head_arch)
             else:
                 yield name, tensor
 
     @staticmethod
     def _split_qkv(
-        name: str, tensor: torch.Tensor, arch: DFlashHeadArch
+        name: str, tensor: torch.Tensor, head_arch: DFlashHeadArch
     ) -> Iterator[tuple[str, torch.Tensor]]:
         """Split one fused QKV tensor into three.
 
         Args:
             name: The fused parameter name.
             tensor: Its value.
-            arch: Supplies `q_size` and `kv_size`.
+            head_arch: Supplies `q_size` and `kv_size`.
 
         Yields:
             The `q_proj`, `k_proj` and `v_proj` pairs.
         """
-        suffix = name.rsplit(".", 1)[1]
-        stem = name[: -len(f"qkv_proj.{suffix}")]
-        q, k, v = tensor.split([arch.q_size, arch.kv_size, arch.kv_size], dim=0)
-        yield f"{stem}q_proj.{suffix}", q
-        yield f"{stem}k_proj.{suffix}", k
-        yield f"{stem}v_proj.{suffix}", v
+        param_suffix = name.rsplit(".", 1)[1]
+        name_stem = name[: -len(f"qkv_proj.{param_suffix}")]
+        query, key, value = tensor.split(
+            [head_arch.q_size, head_arch.kv_size, head_arch.kv_size], dim=0
+        )
+        yield f"{name_stem}q_proj.{param_suffix}", query
+        yield f"{name_stem}k_proj.{param_suffix}", key
+        yield f"{name_stem}v_proj.{param_suffix}", value
 
     @staticmethod
     def _split_gate_up(
-        name: str, tensor: torch.Tensor, arch: DFlashHeadArch
+        name: str, tensor: torch.Tensor, head_arch: DFlashHeadArch
     ) -> Iterator[tuple[str, torch.Tensor]]:
         """Split one fused gate/up tensor into two.
 
         Args:
             name: The fused parameter name.
             tensor: Its value.
-            arch: Supplies `intermediate_size`.
+            head_arch: Supplies `intermediate_size`.
 
         Yields:
             The `gate_proj` and `up_proj` pairs.
         """
-        stem = name[: -len("gate_up_proj.weight")]
+        name_stem = name[: -len("gate_up_proj.weight")]
         gate, up = tensor.split(
-            [arch.intermediate_size, arch.intermediate_size], dim=0
+            [head_arch.intermediate_size, head_arch.intermediate_size], dim=0
         )
-        yield f"{stem}gate_proj.weight", gate
-        yield f"{stem}up_proj.weight", up
+        yield f"{name_stem}gate_proj.weight", gate
+        yield f"{name_stem}up_proj.weight", up

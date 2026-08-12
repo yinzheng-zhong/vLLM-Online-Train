@@ -7,7 +7,7 @@ class BlockBuilder:
 
     def build(
         self,
-        record: RolloutRecord,
+        rollout_record: RolloutRecord,
         *,
         num_draft_tokens: int,
         stride: int,
@@ -19,27 +19,27 @@ class BlockBuilder:
         target's own continuation.
 
         Args:
-            record: The finished rollout.
+            rollout_record: The finished rollout.
             num_draft_tokens: `D`, labels per block.
             stride: Spacing between candidate anchors.
 
         Returns:
             The blocks, in anchor order.
         """
-        tokens = record.token_ids.tolist()
-        total = len(tokens)
-        first = max(record.prompt_len - 1, 0)
+        token_ids = rollout_record.token_ids.tolist()
+        num_tokens = len(token_ids)
+        first_anchor = max(rollout_record.prompt_len - 1, 0)
 
-        blocks: list[BlockRecord] = []
-        for anchor in range(first, total - num_draft_tokens, stride):
-            labels = tokens[anchor + 1 : anchor + 1 + num_draft_tokens]
+        block_records: list[BlockRecord] = []
+        for anchor in range(first_anchor, num_tokens - num_draft_tokens, stride):
+            labels = token_ids[anchor + 1 : anchor + 1 + num_draft_tokens]
             if len(labels) < num_draft_tokens:
                 break
-            blocks.append(
+            block_records.append(
                 BlockRecord(
                     anchor=anchor,
                     draft_token_ids=labels,
                     accepted=num_draft_tokens,
                 )
             )
-        return blocks
+        return block_records

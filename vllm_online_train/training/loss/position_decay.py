@@ -12,16 +12,16 @@ class PositionDecay:
         """
         self.gamma = gamma
 
-    def weights(self, batch: ReplayBatch) -> torch.Tensor | None:
+    def weights(self, replay_batch: ReplayBatch) -> torch.Tensor | None:
         """Weight every scored position by its offset inside its block.
 
         Args:
-            batch: The batch being scored.
+            replay_batch: The batch being scored.
 
         Returns:
             `[B, A, D]` weights, or `None` for the uniform mean.
         """
         if not self.gamma:
             return None
-        offsets = batch.block_offsets().float()
-        return torch.exp(-(offsets - 1.0).clamp_min(0.0) / self.gamma)
+        block_offsets = replay_batch.block_offsets().float()
+        return torch.exp(-(block_offsets - 1.0).clamp_min(0.0) / self.gamma)
