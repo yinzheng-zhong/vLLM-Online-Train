@@ -45,7 +45,7 @@ class TrainableDFlashHead(nn.Module):
             target_features: `[B, T, num_features * H]`.
 
         Returns:
-            `[B, T, H]`.
+            `[B, T, H]`, cast to the compute dtype.
 
         Raises:
             ValueError: If the feature width is not what this head's `fc` expects.
@@ -58,7 +58,8 @@ class TrainableDFlashHead(nn.Module):
                 f"hidden_size={self.arch.hidden_size}). The capture is reading a "
                 "different number of target layers than this head expects."
             )
-        return self.model.hidden_norm(self.model.fc(target_features))
+        features = target_features.to(self.compute_dtype)
+        return self.model.hidden_norm(self.model.fc(features))
 
     def build_block_inputs(
         self, anchor_token_ids: torch.Tensor, block_keep_mask: torch.Tensor

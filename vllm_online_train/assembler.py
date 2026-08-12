@@ -98,19 +98,22 @@ class SessionAssembler:
         if spec_config is None:
             return None
 
-        config = self.resolver.resolve(vllm_config, settings)
-        engine = EngineStateProvider(
-            self.target_locator,
-            runner.get_model(),
-            runner.device,
-            vllm_config.model_config.dtype,
-        )
-        provider = self.build_provider(config, engine)
-        manager = self.build_manager(
-            runner, vllm_config, config, provider, Path(spec_config.model)
-        )
-        self.log_summary(config, provider.device)
-        return self.start_session(manager, config)
+        # Allocates the head, the borrowed state and the staging buffers outside any
+        # `inference_mode` region the caller is already inside.
+        with torch.inference_mode(False):
+            config = self.resolver.resolve(vllm_config, settings)
+            engine = EngineStateProvider(
+                self.target_locator,
+                runner.get_model(),
+                runner.device,
+                vllm_config.model_config.dtype,
+            )
+            provider = self.build_provider(config, engine)
+            manager = self.build_manager(
+                runner, vllm_config, config, provider, Path(spec_config.model)
+            )
+            self.log_summary(config, provider.device)
+            return self.start_session(manager, config)
 
     @staticmethod
     def applicable(vllm_config: Any, settings: OnlineTrainSettings) -> Any | None:

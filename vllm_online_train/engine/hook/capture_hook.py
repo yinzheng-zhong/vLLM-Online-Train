@@ -4,6 +4,7 @@ from typing import Any
 from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.engine.hook.capture_state import CaptureState
 from vllm_online_train.engine.hook.method_patcher import MethodPatcher
+from vllm_online_train.engine.hook.runner_guard import RunnerGuard
 from vllm_online_train.engine.hook.settings_loader import SettingsLoader
 from vllm_online_train.logger import init_logger
 from vllm_online_train.step import EngineStep
@@ -17,6 +18,7 @@ class CaptureHook:
         patcher: MethodPatcher,
         loader: SettingsLoader,
         state: CaptureState,
+        runner_guard: RunnerGuard,
     ) -> None:
         """Tees one engine step's training features out of the model runner.
 
@@ -29,10 +31,12 @@ class CaptureHook:
             patcher: Wraps and unwraps the runner method.
             loader: Reads the operator's settings.
             state: Holds the session and the disabled flag.
+            runner_guard: Reports a model runner the patch cannot reach.
         """
         self.patcher = patcher
         self.loader = loader
         self.state = state
+        self.runner_guard = runner_guard
 
     @property
     def installed(self) -> bool:
@@ -40,7 +44,8 @@ class CaptureHook:
         return self.patcher.installed
 
     def install(self) -> bool:
-        """Wrap the runner method. Idempotent.
+        """Wrap the runner method and guard the runner the patch cannot reach.
+        Idempotent.
 
         Returns:
             Whether the method is now wrapped.
@@ -48,11 +53,13 @@ class CaptureHook:
         Raises:
             RuntimeError: If the method's signature does not match the pin.
         """
+        self.runner_guard.install()
         return self.patcher.install(self.observe)
 
     def uninstall(self) -> None:
-        """Restore the original method and reset the capture state."""
+        """Restore the original method and the guard, and reset the capture state."""
         self.patcher.uninstall()
+        self.runner_guard.uninstall()
         self.state.reset()
 
     def observe(

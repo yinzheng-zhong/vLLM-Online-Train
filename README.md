@@ -284,6 +284,24 @@ installs — inside the worker, at startup — the signature is asserted against
 mismatch, so a vLLM bump fails loudly rather than silently capturing the wrong
 tensor. Re-verify on every bump.
 
+## The V2 model runner
+
+vLLM ships two model runners, and `propose_draft_token_ids` belongs to the V1
+`GPUModelRunner`. The V2 runner drafts through a `BaseSpeculator` and never calls it,
+so on a V2 engine the patch installs, captures nothing, and training never starts.
+**Only the V1 runner is supported today.** Serve with the switch set:
+
+```bash
+VLLM_USE_V2_MODEL_RUNNER=0 \
+VLLM_PLUGINS=online_train ONLINE_TRAIN_CONFIG=./train.json \
+vllm serve Qwen/Qwen3-4B ...
+```
+
+`RunnerGuard` wraps the V2 runner's constructor so the combination reports itself
+rather than serving in silence, and only when `ONLINE_TRAIN_CONFIG` is set — an
+installed-but-unconfigured plugin stays inert. Look for `Using V2 Model Runner` in the
+startup log.
+
 ## Tests
 
 ```bash

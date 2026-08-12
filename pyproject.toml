@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vllm-online-train"
-version = "0.7.1"
+version = "0.7.2"
 description = "Train a speculative draft head from live traffic on a serving vLLM engine"
 readme = "README.md"
 requires-python = ">=3.10"

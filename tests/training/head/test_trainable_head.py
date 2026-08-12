@@ -4,6 +4,8 @@ These are the ones that "still train" when wrong -- the head converges to someth
 just not to a head the serving path will accept.
 """
 
+import dataclasses
+
 import pytest
 import torch
 
@@ -139,3 +141,33 @@ def test_the_head_borrows_its_mask_builder(head):
     """The objective reads position ids from the same instance, so the head must not
     construct its own."""
     assert head.masks is mask_builder
+
+
+def test_project_context_takes_features_at_the_capture_dtype(head, batch):
+    """The trained layers run at fp32 while the capture buffers features at the
+    model's dtype, so the projection has to take the cast. Without it every step
+    dies in `fc` on any bf16 target, which is every target vLLM serves by default."""
+    features = batch.target_features.to(torch.bfloat16)
+    assert features.dtype != head.compute_dtype
+
+    projected = head.project_context(features)
+
+    assert projected.dtype == head.compute_dtype
+    torch.testing.assert_close(
+        projected,
+        head.project_context(features.to(head.compute_dtype)),
+        rtol=0,
+        atol=0,
+    )
+
+
+def test_replay_takes_features_at_the_capture_dtype(head, batch):
+    """The whole replay, not just the projection: a cast that lands only in
+    `project_context` would move the failure one layer down."""
+    bf16 = dataclasses.replace(
+        batch, target_features=batch.target_features.to(torch.bfloat16)
+    )
+    hidden = head.replay(bf16)
+    assert hidden.dtype == head.compute_dtype
+    hidden.sum().backward()
+    assert head.model.fc.weight.grad is not None
