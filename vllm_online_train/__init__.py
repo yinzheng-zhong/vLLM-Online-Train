@@ -6,6 +6,7 @@ knows nothing about it and would be the same for a second head architecture:
     engine/          everything that touches vLLM
       hook/          the foothold: the method patch and the settings it loads
       capture/       engine step -> rollout pool -- head-agnostic
+      rollouts/      the pool itself: the records, the buffer and the draw
       state/         the borrowed target state, on the engine's device or a second one
     training/        everything that trains the head
       collate/       rollout pool -> anchored replay batches -- head-agnostic

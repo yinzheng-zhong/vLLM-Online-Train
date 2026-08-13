@@ -3,7 +3,7 @@ import time
 import torch
 
 from vllm_online_train.config.settings import OptimSettings
-from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.rollouts.rollout_buffer import RolloutBuffer
 from vllm_online_train.logger import init_logger
 from vllm_online_train.training.collate.replay_batch import ReplayBatch
 from vllm_online_train.training.collate.rollout_collator import RolloutCollator

@@ -1,4 +1,4 @@
-from vllm_online_train.engine.capture.records import RolloutRecord
+from vllm_online_train.engine.rollouts.rollout_records import RolloutRecord
 from vllm_online_train.training.collate.replay_batch import BlockRecord
 
 

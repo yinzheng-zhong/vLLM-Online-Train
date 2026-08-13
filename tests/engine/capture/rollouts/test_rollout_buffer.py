@@ -15,8 +15,8 @@ from tests.conftest import (
     make_config,
     make_settings,
 )
-from vllm_online_train.engine.capture.records import BufferStats
-from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.capture.rollouts.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.capture.rollouts.rollout_records import BufferStats
 
 FEATURE_WIDTH = NUM_FEATURES * HIDDEN
 
@@ -35,7 +35,7 @@ def test_accumulates_chunks_across_steps():
     rollout_buffer.begin("a", prompt_len=10)
     rollout_buffer.add_chunk("a", **make_chunk(20, start=0))
     rollout_buffer.add_chunk("a", **make_chunk(20, start=20))
-    rollout_record = rollout_buffer.finish("a")
+    rollout_record = rollout_buffer.seal("a")
 
     assert rollout_record is not None
     assert rollout_record.num_tokens == 40
@@ -69,7 +69,7 @@ def test_drops_rollout_that_would_exceed_max_length():
     rollout_buffer.begin("a", prompt_len=4)
     rollout_buffer.add_chunk("a", **make_chunk(30))
     rollout_buffer.add_chunk("a", **make_chunk(10))
-    assert rollout_buffer.finish("a") is None
+    assert rollout_buffer.seal("a") is None
     assert rollout_buffer.buffer_stats.dropped_too_long == 1
 
 
@@ -81,7 +81,7 @@ def test_ignores_chunks_after_a_drop():
     rollout_buffer.add_chunk("a", **make_chunk(10))
     rollout_buffer.drop("a", reason="aborted")
     rollout_buffer.add_chunk("a", **make_chunk(30))
-    assert rollout_buffer.finish("a") is None
+    assert rollout_buffer.seal("a") is None
     assert rollout_buffer.buffer_stats.dropped_aborted == 1
 
 
@@ -91,7 +91,7 @@ def test_dropping_an_unknown_request_still_blocks_later_chunks():
     rollout_buffer.drop("a", reason="prefix_cache_hit")
     rollout_buffer.begin("a", prompt_len=4)
     rollout_buffer.add_chunk("a", **make_chunk(30))
-    assert rollout_buffer.finish("a") is None
+    assert rollout_buffer.seal("a") is None
 
 
 def test_drops_rollouts_too_short_to_yield_an_anchor():
@@ -110,13 +110,13 @@ def test_drops_rollouts_too_short_to_yield_an_anchor():
     rollout_buffer = make_buffer(resolved_config)
     rollout_buffer.begin("a", prompt_len=prompt_len)
     rollout_buffer.add_chunk("a", **make_chunk(first_anchor + num_draft_tokens))
-    assert rollout_buffer.finish("a") is None
+    assert rollout_buffer.seal("a") is None
     assert rollout_buffer.buffer_stats.dropped_too_short == 1
 
     # One more token and the anchor at `prompt_len - 1` has a full block of labels.
     rollout_buffer.begin("b", prompt_len=prompt_len)
     rollout_buffer.add_chunk("b", **make_chunk(first_anchor + num_draft_tokens + 1))
-    rollout_record = rollout_buffer.finish("b")
+    rollout_record = rollout_buffer.seal("b")
     assert rollout_record is not None
     assert block_builder.build(
         rollout_record, num_draft_tokens=num_draft_tokens, stride=1
@@ -134,7 +134,7 @@ def test_evicts_oldest_once_capacity_is_exceeded():
         req_id = f"r{index}"
         rollout_buffer.begin(req_id, prompt_len=2)
         rollout_buffer.add_chunk(req_id, **make_chunk(40))
-        assert rollout_buffer.finish(req_id) is not None
+        assert rollout_buffer.seal(req_id) is not None
 
     assert rollout_buffer.num_tokens <= 100
     assert rollout_buffer.buffer_stats.admitted == 4
@@ -150,7 +150,7 @@ def test_sampling_does_not_consume():
         req_id = f"r{index}"
         rollout_buffer.begin(req_id, prompt_len=2)
         rollout_buffer.add_chunk(req_id, **make_chunk(40))
-        rollout_buffer.finish(req_id)
+        rollout_buffer.seal(req_id)
 
     assert rollout_buffer.can_sample(2)
     assert len(rollout_buffer.sample(2)) == 2
@@ -182,7 +182,7 @@ def test_sampling_draws_from_a_snapshot_of_the_pool():
         req_id = f"r{index}"
         rollout_buffer.begin(req_id, prompt_len=2)
         rollout_buffer.add_chunk(req_id, **make_chunk(40))
-        rollout_buffer.finish(req_id)
+        rollout_buffer.seal(req_id)
 
     rollout_buffer.sample(2)
     assert rollout_buffer.num_rollouts == 3
@@ -193,7 +193,7 @@ def test_cannot_sample_below_batch_size():
     rollout_buffer = make_buffer(make_config())
     rollout_buffer.begin("a", prompt_len=2)
     rollout_buffer.add_chunk("a", **make_chunk(40))
-    rollout_buffer.finish("a")
+    rollout_buffer.seal("a")
     assert not rollout_buffer.can_sample(3)
     # `sample` still degrades gracefully rather than raising.
     assert len(rollout_buffer.sample(3)) == 1
@@ -206,7 +206,7 @@ def test_begin_is_idempotent():
     rollout_buffer.add_chunk("a", **make_chunk(20))
     rollout_buffer.begin("a", prompt_len=10)
     rollout_buffer.add_chunk("a", **make_chunk(20, start=20))
-    rollout_record = rollout_buffer.finish("a")
+    rollout_record = rollout_buffer.seal("a")
     assert rollout_record is not None and rollout_record.num_tokens == 40
 
 
@@ -214,7 +214,7 @@ def test_clear_empties_both_stages():
     rollout_buffer = make_buffer(make_config())
     rollout_buffer.begin("a", prompt_len=2)
     rollout_buffer.add_chunk("a", **make_chunk(40))
-    rollout_buffer.finish("a")
+    rollout_buffer.seal("a")
     rollout_buffer.begin("b", prompt_len=2)
     rollout_buffer.clear()
     assert rollout_buffer.num_rollouts == 0
@@ -226,7 +226,7 @@ def test_metrics_report_fill_and_drop_reasons():
     rollout_buffer = make_buffer(make_config())
     rollout_buffer.begin("a", prompt_len=2)
     rollout_buffer.add_chunk("a", **make_chunk(40))
-    rollout_buffer.finish("a")
+    rollout_buffer.seal("a")
     rollout_buffer.drop("b", reason="prefix_cache_hit")
 
     metrics = rollout_buffer.as_metrics()

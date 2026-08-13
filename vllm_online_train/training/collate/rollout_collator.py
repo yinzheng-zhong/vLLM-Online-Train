@@ -1,7 +1,7 @@
 import torch
 
 from vllm_online_train.config.shapes import EngineShapes
-from vllm_online_train.engine.capture.records import RolloutRecord
+from vllm_online_train.engine.rollouts.rollout_records import RolloutRecord
 from vllm_online_train.logger import init_logger
 from vllm_online_train.training.collate.anchor_sampler import AnchorSampler
 from vllm_online_train.training.collate.block_builder import BlockBuilder

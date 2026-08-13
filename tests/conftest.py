@@ -36,9 +36,14 @@ from tests.instances import (
 )
 from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.config.shapes import EngineShapes, ResolvedConfig
-from vllm_online_train.engine.capture.pool_sampler import PoolSampler
-from vllm_online_train.engine.capture.records import BufferStats, RolloutRecord
-from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.rollouts.pooled_rollout_sampler import (
+    PooledRolloutSampler,
+)
+from vllm_online_train.engine.rollouts.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.rollouts.rollout_records import (
+    BufferStats,
+    RolloutRecord,
+)
 from vllm_online_train.training.collate.anchor_sampler import AnchorSampler
 from vllm_online_train.training.collate.device_transfer import DeviceTransfer
 from vllm_online_train.training.collate.rollout_collator import RolloutCollator
@@ -197,14 +202,14 @@ def make_buffer(resolved_config: ResolvedConfig) -> RolloutBuffer:
         The pool.
     """
     online_train_settings = resolved_config.online_train_settings
-    pool_sampler = PoolSampler(
+    pooled_rollout_sampler = PooledRolloutSampler(
         online_train_settings.buffer,
         random.Random(online_train_settings.bookkeeping.seed),
     )
     return RolloutBuffer(
         online_train_settings.buffer,
         resolved_config.engine_shapes,
-        pool_sampler,
+        pooled_rollout_sampler,
         BufferStats(),
     )
 

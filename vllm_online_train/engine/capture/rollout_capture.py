@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 from vllm_online_train.config.settings import CaptureSettings
 from vllm_online_train.engine.capture.feature_stager import FeatureStager
 from vllm_online_train.engine.capture.request_sampler import RequestSampler
-from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
 from vllm_online_train.engine.capture.valid_positions import ValidPositions
+from vllm_online_train.engine.capture.rollouts.rollout_buffer import RolloutBuffer
 from vllm_online_train.logger import init_logger
 from vllm_online_train.step import EngineStep
 
@@ -165,7 +165,7 @@ class RolloutCapture:
         for req_id in scheduler_output.finished_req_ids:
             if req_id in self._seen_req_ids:
                 self._seen_req_ids.discard(req_id)
-                self.rollout_buffer.finish(req_id)
+                self.rollout_buffer.seal(req_id)
 
     def abort(self, req_ids: set[str]) -> None:
         """Discard rollouts for requests that will not finish normally.

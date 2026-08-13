@@ -2,8 +2,10 @@ import torch
 
 from vllm_online_train.config.settings import BufferSettings
 from vllm_online_train.config.shapes import EngineShapes
-from vllm_online_train.engine.capture.pool_sampler import PoolSampler
-from vllm_online_train.engine.capture.records import (
+from vllm_online_train.engine.capture.rollouts.pooled_rollout_sampler import (
+    PooledRolloutSampler,
+)
+from vllm_online_train.engine.capture.rollouts.rollout_records import (
     BufferStats,
     PendingRollout,
     RolloutRecord,
@@ -18,7 +20,7 @@ class RolloutBuffer:
         self,
         buffer_settings: BufferSettings,
         engine_shapes: EngineShapes,
-        pool_sampler: PoolSampler,
+        pooled_rollout_sampler: PooledRolloutSampler,
         buffer_stats: BufferStats,
     ) -> None:
         """Host-side pool of finished rollouts, with capacity counted in tokens.
@@ -33,12 +35,12 @@ class RolloutBuffer:
         Args:
             buffer_settings: Capacity and the length bounds.
             engine_shapes: Supplies `D`, which sets the minimum usable rollout length.
-            pool_sampler: Draws training batches from the pool.
+            pooled_rollout_sampler: Draws training batches from the pool.
             buffer_stats: Counters this buffer increments.
         """
         self.buffer_settings = buffer_settings
         self.engine_shapes = engine_shapes
-        self.pool_sampler = pool_sampler
+        self.pooled_rollout_sampler = pooled_rollout_sampler
         self.buffer_stats = buffer_stats
         self._pending_rollouts: dict[str, PendingRollout] = {}
         self._pooled_rollouts: list[RolloutRecord] = []
@@ -143,7 +145,7 @@ class RolloutBuffer:
         self.buffer_stats.count_drop(reason)
         logger.debug("dropped rollout %s: reason=%s", req_id, reason)
 
-    def finish(self, req_id: str) -> RolloutRecord | None:
+    def seal(self, req_id: str) -> RolloutRecord | None:
         """Seal a request and admit it to the pool.
 
         Args:
@@ -207,7 +209,7 @@ class RolloutBuffer:
         Returns:
             The drawn rollouts.
         """
-        return self.pool_sampler.draw(list(self._pooled_rollouts), count)
+        return self.pooled_rollout_sampler.draw(list(self._pooled_rollouts), count)
 
     def clear(self) -> None:
         """Drop every pending and pooled rollout."""

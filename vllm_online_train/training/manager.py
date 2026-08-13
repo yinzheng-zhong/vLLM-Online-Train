@@ -5,8 +5,8 @@ import torch
 
 from vllm_online_train.config.shapes import ResolvedConfig
 from vllm_online_train.contracts.provider import StateProvider
-from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
 from vllm_online_train.engine.capture.rollout_capture import RolloutCapture
+from vllm_online_train.engine.rollouts.rollout_buffer import RolloutBuffer
 from vllm_online_train.logger import init_logger
 from vllm_online_train.step import EngineStep
 from vllm_online_train.training.checkpoint.exporter import CheckpointExporter

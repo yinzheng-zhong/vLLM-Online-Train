@@ -1,13 +1,13 @@
 import random
 
 from vllm_online_train.config.settings import BufferSettings
-from vllm_online_train.engine.capture.records import RolloutRecord
+from vllm_online_train.engine.capture.rollouts.rollout_records import RolloutRecord
 from vllm_online_train.logger import init_logger
 
 logger = init_logger(__name__)
 
 
-class PoolSampler:
+class PooledRolloutSampler:
     def __init__(self, buffer_settings: BufferSettings, rng: random.Random) -> None:
         """Draws a training batch from the pool without consuming it.
 

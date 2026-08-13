@@ -10,12 +10,14 @@ from vllm_online_train.config.settings import OnlineTrainSettings
 from vllm_online_train.config.shapes import ResolvedConfig
 from vllm_online_train.contracts.provider import StateProvider
 from vllm_online_train.engine.capture.feature_stager import FeatureStager
-from vllm_online_train.engine.capture.pool_sampler import PoolSampler
-from vllm_online_train.engine.capture.records import BufferStats
 from vllm_online_train.engine.capture.request_sampler import RequestSampler
-from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
 from vllm_online_train.engine.capture.rollout_capture import RolloutCapture
 from vllm_online_train.engine.capture.valid_positions import ValidPositions
+from vllm_online_train.engine.rollouts.pooled_rollout_sampler import (
+    PooledRolloutSampler,
+)
+from vllm_online_train.engine.rollouts.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.rollouts.rollout_records import BufferStats
 from vllm_online_train.engine.state.engine import EngineStateProvider
 from vllm_online_train.engine.state.mirrored import MirroredStateProvider
 from vllm_online_train.engine.state.target_locator import TargetLocator
@@ -310,14 +312,14 @@ class SessionAssembler:
             The pool.
         """
         online_train_settings = resolved_config.online_train_settings
-        pool_sampler = PoolSampler(
+        pooled_rollout_sampler = PooledRolloutSampler(
             online_train_settings.buffer,
             random.Random(online_train_settings.bookkeeping.seed),
         )
         return RolloutBuffer(
             online_train_settings.buffer,
             resolved_config.engine_shapes,
-            pool_sampler,
+            pooled_rollout_sampler,
             BufferStats(),
         )
 

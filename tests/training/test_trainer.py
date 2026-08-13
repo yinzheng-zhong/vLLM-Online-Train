@@ -137,7 +137,7 @@ def test_step_from_buffer_is_none_when_the_pool_is_thin(
             features=rollout_record.features,
             final_hidden=rollout_record.final_hidden,
         )
-        rollout_buffer.finish(f"r{index}")
+        rollout_buffer.seal(f"r{index}")
     assert not rollout_buffer.can_sample(4)
     assert online_trainer.step_from_buffer(rollout_buffer) is None
 
@@ -156,7 +156,7 @@ def test_step_from_buffer_trains_once_the_pool_fills(
             features=rollout_record.features,
             final_hidden=rollout_record.final_hidden,
         )
-        rollout_buffer.finish(f"r{index}")
+        rollout_buffer.seal(f"r{index}")
 
     metrics = online_trainer.step_from_buffer(rollout_buffer)
     assert metrics is not None

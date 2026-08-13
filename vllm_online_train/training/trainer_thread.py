@@ -70,7 +70,7 @@ class TrainerThread:
             self._thread = None
 
     def _run(self) -> None:
-        """Poll the gate, training in bursts while it stays open."""
+        """Poll the gate, training in bursts while it stays open. Main training entry point."""
         poll_seconds = self.gate_settings.poll_seconds
         micro_step_cap = self.gate_settings.max_micro_steps_per_gate
         while not self._stop.is_set():

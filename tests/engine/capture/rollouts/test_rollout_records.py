@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from tests.conftest import HIDDEN, NUM_FEATURES, make_arch
-from vllm_online_train.engine.capture.records import (
+from vllm_online_train.engine.capture.rollouts.rollout_records import (
     BufferStats,
     PendingRollout,
     RolloutRecord,
@@ -38,7 +38,7 @@ def test_pending_counts_tokens_as_chunks_arrive():
 
 def test_discard_releases_the_chunks_it_accumulated():
     """A dropped rollout holds host memory until the request retires, so the chunks
-    go immediately rather than at `finish`."""
+    go immediately rather than at `seal`."""
     pending_rollout = PendingRollout(prompt_len=4)
     pending_rollout.append(
         torch.zeros(5, dtype=torch.int32),

@@ -21,7 +21,7 @@ from tests.conftest import (
 from vllm_online_train.assembler import SessionAssembler
 from vllm_online_train.config.shapes import ResolvedConfig
 from vllm_online_train.contracts.provider import StateProvider
-from vllm_online_train.engine.capture.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.rollouts.rollout_buffer import RolloutBuffer
 from vllm_online_train.engine.state.engine import EngineStateProvider
 from vllm_online_train.engine.state.target_locator import TargetLocator
 from vllm_online_train.training.head.trainable_head import TrainableDFlashHead
