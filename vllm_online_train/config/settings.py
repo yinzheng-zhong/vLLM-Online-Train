@@ -298,6 +298,10 @@ class BookkeepingSettings:
     checkpoint_every: int = 0
     """Steps between checkpoint exports; 0 disables. Also the hot-publish cadence."""
 
+    status_every_ms: float = 10_000.0
+    """Wall-clock milliseconds between `status` records, which report the capture, pool
+    and gate counters whether or not a training step has run; 0 disables."""
+
     metrics_path: str | None = None
     """JSONL sink for per-step training metrics."""
 
@@ -305,7 +309,8 @@ class BookkeepingSettings:
         """Reject negative cadences.
 
         Raises:
-            ValueError: If `log_every` or `checkpoint_every` is negative.
+            ValueError: If `log_every`, `checkpoint_every` or `status_every_ms` is
+                negative.
         """
         if self.log_every < 0:
             raise ValueError(f"log_every must be >= 0, got {self.log_every}")
@@ -313,6 +318,15 @@ class BookkeepingSettings:
             raise ValueError(
                 f"checkpoint_every must be >= 0, got {self.checkpoint_every}"
             )
+        if self.status_every_ms < 0:
+            raise ValueError(
+                f"status_every_ms must be >= 0 (0 disables), got {self.status_every_ms}"
+            )
+
+    @property
+    def status_seconds(self) -> float:
+        """`status_every_ms` in seconds."""
+        return self.status_every_ms / 1000.0
 
 
 @dataclass(frozen=True)

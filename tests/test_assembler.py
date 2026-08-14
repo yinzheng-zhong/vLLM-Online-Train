@@ -281,6 +281,21 @@ def test_the_session_is_built_outside_the_engines_inference_mode():
         online_train_session.stop()
 
 
+def test_the_session_reports_the_pool_on_a_timer():
+    """The status thread reads the same gate and pool the trainer does, and writes to
+    the same sink, so the two views of a run cannot disagree."""
+    online_train_session = build_session()
+    try:
+        status_thread = online_train_session.status_thread
+        assert status_thread.enabled
+        assert status_thread.idle_gate is online_train_session.idle_gate
+        assert status_thread.idle_gate is online_train_session.trainer_thread.idle_gate
+        assert status_thread.step_runner is online_train_session.online_train_manager
+        assert status_thread.metrics_sink is online_train_session.metrics_sink
+    finally:
+        online_train_session.stop()
+
+
 def test_a_session_built_under_inference_mode_can_take_a_backward():
     """The property the inference flag actually costs."""
     online_train_session = build_session()

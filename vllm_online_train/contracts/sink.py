@@ -3,7 +3,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class MetricsSink(Protocol):
-    """Receives named metric records from the trainer thread."""
+    """Receives named metric records from the trainer and status threads."""
 
     def write(self, event: str, field_values: dict[str, Any]) -> None:
         """Append one record.

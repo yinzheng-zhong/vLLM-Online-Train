@@ -47,6 +47,7 @@ from vllm_online_train.training.manager import OnlineTrainManager
 from vllm_online_train.training.optim.schedule_factory import ScheduleFactory
 from vllm_online_train.training.optim.trainer import OnlineTrainer
 from vllm_online_train.training.session import OnlineTrainSession
+from vllm_online_train.training.status_thread import StatusThread
 from vllm_online_train.training.trainer_thread import TrainerThread
 
 logger = init_logger(__name__)
@@ -515,8 +516,18 @@ class SessionAssembler:
             online_train_settings.bookkeeping,
             metrics_sink,
         )
+        status_thread = StatusThread(
+            idle_gate,
+            online_train_manager,
+            online_train_settings.bookkeeping,
+            metrics_sink,
+        )
         online_train_session = OnlineTrainSession(
-            online_train_manager, idle_gate, trainer_thread, metrics_sink
+            online_train_manager,
+            idle_gate,
+            trainer_thread,
+            status_thread,
+            metrics_sink,
         )
         online_train_session.start()
         return online_train_session

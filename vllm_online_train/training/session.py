@@ -3,6 +3,7 @@ from vllm_online_train.logger import init_logger
 from vllm_online_train.step import EngineStep
 from vllm_online_train.training.idle_gate import IdleGate
 from vllm_online_train.training.manager import OnlineTrainManager
+from vllm_online_train.training.status_thread import StatusThread
 from vllm_online_train.training.trainer_thread import TrainerThread
 
 logger = init_logger(__name__)
@@ -14,6 +15,7 @@ class OnlineTrainSession:
         online_train_manager: OnlineTrainManager,
         idle_gate: IdleGate,
         trainer_thread: TrainerThread,
+        status_thread: StatusThread,
         metrics_sink: MetricsSink,
     ) -> None:
         """One handle over everything the capture hook drives.
@@ -23,16 +25,19 @@ class OnlineTrainSession:
                 optimizer.
             idle_gate: Records engine steps and decides when training may run.
             trainer_thread: Polls the gate and runs micro-batches.
+            status_thread: Reports the capture and pool counters on a timer.
             metrics_sink: Receives the metric records.
         """
         self.online_train_manager = online_train_manager
         self.idle_gate = idle_gate
         self.trainer_thread = trainer_thread
+        self.status_thread = status_thread
         self.metrics_sink = metrics_sink
 
     def start(self) -> None:
-        """Start the trainer thread and record the run's shapes."""
+        """Start the trainer and status threads, and record the run's shapes."""
         self.trainer_thread.start()
+        self.status_thread.start()
         resolved_config = self.online_train_manager.resolved_config
         engine_shapes = resolved_config.engine_shapes
         online_train_settings = resolved_config.online_train_settings
@@ -76,7 +81,8 @@ class OnlineTrainSession:
         self.online_train_manager.observe(engine_step)
 
     def stop(self) -> None:
-        """Stop the trainer thread and release the metrics sink."""
+        """Stop both threads and release the metrics sink."""
         logger.debug("Stopping online train session")
         self.trainer_thread.stop()
+        self.status_thread.stop()
         self.metrics_sink.close()

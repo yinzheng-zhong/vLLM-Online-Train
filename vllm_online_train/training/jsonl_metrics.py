@@ -12,7 +12,7 @@ logger = init_logger(__name__)
 
 class JsonlMetricsSink:
     def __init__(self, path: str | Path | None) -> None:
-        """Append-only JSONL writer, safe to call from the trainer thread.
+        """Append-only JSONL writer, safe to call from the trainer and status threads.
 
         A no-op when constructed without a path, so callers never branch on whether
         metrics are configured. Every write is flushed, because the engine may be killed

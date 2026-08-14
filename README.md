@@ -26,7 +26,7 @@ engine, `training/` knows nothing about it.
 | `training/head/` | the DFlash module, its layers, its mask geometry and the target layers that feed it — DFlash-typed |
 | `training/checkpoint/` | the on-disk format, export and hot publish — DFlash-typed |
 | `training/loss/`, `training/optim/` | the objective, and the optimizer loop it runs under |
-| `training/` (top) | the idle gate, the trainer thread, the metrics sink and the manager |
+| `training/` (top) | the idle gate, the trainer and status threads, the metrics sink and the manager |
 | `config/`, `contracts/` | the leaf layer both halves depend on |
 | `step.py` | one engine step's activations, as the hook hands them over |
 | `assembler.py` | the one wiring site for a training session |
@@ -127,10 +127,18 @@ is itself the opt-in; you do not also need `enabled: true` inside.
 ## 4. Watch the right number first
 
 Metrics live in the **worker** process, so `/metrics` cannot see them. They go to
-the JSONL sink from `metrics_path`, one file per worker pid:
+the JSONL sink from `metrics_path`, one file per worker pid. Two record kinds land
+there, so filter by `event`:
+
+| event | written by | when |
+|---|---|---|
+| `train` | trainer thread | every `log_every` micro-steps, after a step succeeds |
+| `status` | status thread | every `status_every_ms`, whether or not training runs |
+| `train_error` | trainer thread | a step raised |
 
 ```bash
-tail -f ./online-train.<pid>.jsonl | jq -c '{step, loss:."loss/total", top1:."train/top1_agree", gate:."gate/open_fraction", rollouts:."buffer/rollouts"}'
+tail -f ./online-train.<pid>.jsonl \
+  | jq -c 'select(.event=="train") | {step, loss:."loss/total", top1:."train/top1_agree", gate:."gate/open_fraction", rollouts:."buffer/rollouts"}'
 ```
 
 **Watch `gate/open_fraction` before you watch the loss.** If the gate rarely opens
@@ -139,6 +147,35 @@ the deployment rather than the head.
 
 Then `buffer/dropped_*`: a high `dropped_prefix_cache_hit` means prefix caching is
 eating your training data (see Traps).
+
+### Watching the pool when nothing trains
+
+A `train` record only exists once a micro-step has *succeeded*. A run whose gate never
+opens, or whose pool never reaches `sequences_per_step`, writes no `train` records at
+all and is indistinguishable from a run with the plugin switched off. The `status`
+records close that gap: a separate thread snapshots the capture, pool and gate counters
+on a wall-clock timer, so a slow or wedged micro-step cannot delay them either.
+
+```bash
+tail -f ./online-train.<pid>.jsonl \
+  | jq -c 'select(.event=="status") | {rollouts:."buffer/rollouts", pending:."buffer/pending", eligible:."buffer/eligible", fill:."buffer/fill", capturing:."capture/active", gate:."gate/open_fraction", step:."train/step"}'
+```
+
+Read it in this order:
+
+- `capture/active` at 0 under live traffic → nothing is being teed at all; check the
+  capture hook fired (see The V2 model runner).
+- `buffer/pending` climbing but `buffer/rollouts` flat → rollouts are being captured
+  and then dropped. `buffer/dropped_*` says why.
+- `buffer/eligible` below `sequences_per_step` → the trainer has nothing to draw, which
+  is why no `train` record appears.
+- `gate/open_fraction` at 0 with a healthy pool → the gate, not the data, is the
+  bottleneck.
+- `train/step` flat across several status records while the pool is full → steps are
+  failing; look for `train_error`.
+
+`status_every_ms` sets the cadence and defaults to `10000.0`; `0` disables the thread
+entirely.
 
 ## 5. Adopt what it learned
 
