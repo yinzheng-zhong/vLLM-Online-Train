@@ -24,6 +24,7 @@ from vllm_online_train.engine.state.target_locator import TargetLocator
 from vllm_online_train.logger import init_logger
 from vllm_online_train.training.checkpoint.drafter_locator import DrafterLocator
 from vllm_online_train.training.checkpoint.exporter import CheckpointExporter
+from vllm_online_train.training.checkpoint.reader import CheckpointReader
 from vllm_online_train.training.checkpoint.weight_names import WeightNameRewriter
 from vllm_online_train.training.checkpoint.weight_publisher import WeightPublisher
 from vllm_online_train.training.checkpoint.writer import CheckpointWriter
@@ -69,6 +70,7 @@ class SessionAssembler:
         self.arch_factory = ArchFactory()
         self.head_factory = HeadFactory(self.block_mask_builder, self.head_weights)
         self.checkpoint_writer = CheckpointWriter(self.weight_name_rewriter)
+        self.checkpoint_reader = CheckpointReader()
         self.weight_publisher = WeightPublisher(
             self.weight_name_rewriter, self.head_weights
         )
@@ -226,7 +228,9 @@ class SessionAssembler:
         Returns:
             The manager, with its publish target already resolved.
         """
-        draft_head = self.build_head(vllm_config, resolved_config, state_provider)
+        draft_head = self.build_head(
+            vllm_config, resolved_config, state_provider, source_dir
+        )
         rollout_buffer = self.build_buffer(resolved_config)
         online_train_manager = OnlineTrainManager(
             resolved_config=resolved_config,
@@ -256,6 +260,7 @@ class SessionAssembler:
         vllm_config: Any,
         resolved_config: ResolvedConfig,
         state_provider: StateProvider,
+        source_dir: Path,
     ) -> TrainableDFlashHead:
         """Build the head this engine's drafter is served with.
 
@@ -263,10 +268,15 @@ class SessionAssembler:
             vllm_config: The engine config, for the draft model's shape.
             resolved_config: Settings paired with the resolved shapes.
             state_provider: Supplies the embedding table and the LM head.
+            source_dir: The served head's directory, adopted unless the settings ask
+                for a random head.
 
         Returns:
             The head, on the provider's device, trained tensors at fp32 and borrowed
             tensors at the shared dtype.
+
+        Raises:
+            ValueError: If the served checkpoint does not match this head's shape.
         """
         head_arch = self.arch_factory.create(
             vllm_config, resolved_config.engine_shapes
@@ -281,7 +291,47 @@ class SessionAssembler:
         self.head_weights.load_lm_head(
             draft_head, state_provider.lm_head_weight(dtype=shared_dtype)
         )
+        if resolved_config.online_train_settings.head_init.from_served:
+            self.adopt_served_head(draft_head, source_dir)
+        else:
+            logger.info(
+                "head_init_source='random': the trainable head keeps its small "
+                "initialisation and ignores the served checkpoint at %s",
+                source_dir,
+            )
         return draft_head
+
+    def adopt_served_head(
+        self, draft_head: TrainableDFlashHead, source_dir: Path
+    ) -> None:
+        """Copy the served checkpoint's trained tensors into the trainable head.
+
+        Args:
+            draft_head: The freshly built, small-initialised head.
+            source_dir: The served head's directory.
+
+        Raises:
+            ValueError: If the checkpoint does not match this head's shape.
+        """
+        named_tensors = self.checkpoint_reader.read(source_dir)
+        if not named_tensors:
+            logger.warning(
+                "No safetensors file under the served head at %s, so the trainable "
+                "head keeps its random initialisation: train/top1_agree will start at "
+                "chance and whatever the drafter is serving will not be continued. Set "
+                "head_init_source='random' to ask for that deliberately.",
+                source_dir,
+            )
+            return
+        num_loaded = self.head_weights.load_trained(
+            draft_head, self.weight_name_rewriter.fuse(named_tensors)
+        )
+        logger.info(
+            "Trainable head adopted the served checkpoint at %s (%d tensors): "
+            "training continues from it rather than from a random initialisation",
+            source_dir,
+            num_loaded,
+        )
 
     @staticmethod
     def shared_dtype(

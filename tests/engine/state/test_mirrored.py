@@ -10,6 +10,8 @@ compares unequal to a plain `"cpu"`, so the two-device path is exercised on a ma
 with one CUDA device or none.
 """
 
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -238,7 +240,7 @@ def test_the_head_is_built_on_the_training_device(assembler):
     )
 
     draft_head = assembler.build_head(
-        fake_vllm_config(), resolved_config, state_provider
+        fake_vllm_config(), resolved_config, state_provider, Path("/nonexistent/head")
     )
 
     assert draft_head.model.fc.weight.device == placed(REMOTE)

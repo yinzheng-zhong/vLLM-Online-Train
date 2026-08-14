@@ -17,6 +17,7 @@ from vllm_online_train.config.settings_factory import SettingsFactory
 from vllm_online_train.engine.capture.valid_positions import ValidPositions
 from vllm_online_train.training.checkpoint.draft_config import DraftConfigBuilder
 from vllm_online_train.training.checkpoint.drafter_locator import DrafterLocator
+from vllm_online_train.training.checkpoint.reader import CheckpointReader
 from vllm_online_train.training.checkpoint.weight_names import WeightNameRewriter
 from vllm_online_train.training.checkpoint.weight_publisher import WeightPublisher
 from vllm_online_train.training.checkpoint.writer import CheckpointWriter
@@ -42,6 +43,7 @@ head_factory = HeadFactory(block_mask_builder, head_weights)
 arch_factory = ArchFactory()
 weight_name_rewriter = WeightNameRewriter()
 checkpoint_writer = CheckpointWriter(weight_name_rewriter)
+checkpoint_reader = CheckpointReader()
 weight_publisher = WeightPublisher(weight_name_rewriter, head_weights)
 drafter_locator = DrafterLocator()
 target_layer_planner = TargetLayerPlanner()

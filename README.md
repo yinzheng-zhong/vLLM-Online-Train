@@ -153,6 +153,19 @@ The exported directory carries a verbatim copy of the running `config.json`, so 
 is a drop-in replacement. Restart-to-adopt cannot be subtly wrong: the process
 either loads the directory or dies.
 
+The restarted trainer picks the served checkpoint up too, so `top1` resumes where the
+previous run left it rather than at chance. That is `head_init_source`, and it defaults
+to `"served"`:
+
+```json
+{ "head_init_source": "served" }
+```
+
+`"random"` small-inits the trainable head instead and ignores the checkpoint the engine
+is serving — the from-scratch baseline, and the only way to reproduce a learning curve
+from step 0. What does **not** carry across a restart is the AdamW moments and the step
+count, so the learning-rate warmup runs again on each start.
+
 Only then consider `publish_mode: "hot"`, and validate it by asserting acceptance
 equality against `serve(v1)`. The reason for that order is that a bad hot publish is
 **silent** — speculation is always verified against the target, so stale draft

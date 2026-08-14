@@ -14,6 +14,7 @@ from vllm_online_train.config.settings import (
     BufferSettings,
     CaptureSettings,
     GateSettings,
+    HeadInitSettings,
     ObjectiveSettings,
     OnlineTrainSettings,
     OptimSettings,
@@ -27,6 +28,7 @@ SECTIONS = [
     BufferSettings,
     CaptureSettings,
     GateSettings,
+    HeadInitSettings,
     ObjectiveSettings,
     OptimSettings,
     PlacementSettings,
@@ -117,6 +119,14 @@ def test_placement_defaults_to_the_engines_device():
     installed-but-unconfigured trainer stays on the serving GPU."""
     assert PlacementSettings().train_device is None
     assert OnlineTrainSettings().placement.train_device is None
+
+
+def test_the_head_defaults_to_continuing_the_served_checkpoint():
+    """A restart that quietly retrained from scratch is indistinguishable from a head
+    that learned nothing, so continuing is the default and starting over is opt-in."""
+    assert HeadInitSettings().from_served
+    assert OnlineTrainSettings().head_init.from_served
+    assert not HeadInitSettings(head_init_source="random").from_served
 
 
 def test_the_aggregate_is_frozen():

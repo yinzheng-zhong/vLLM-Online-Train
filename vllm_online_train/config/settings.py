@@ -8,6 +8,7 @@ SampleStrategy = Literal["fifo", "reservoir"]
 SharedDtype = Literal["model", "float32"]
 FeatureDtype = Literal["bfloat16", "float16", "float32"]
 PublishMode = Literal["off", "hot"]
+HeadInitSource = Literal["served", "random"]
 
 
 @config(frozen=True)
@@ -259,6 +260,21 @@ class PlacementSettings:
 
 
 @config(frozen=True)
+class HeadInitSettings:
+    """Where the trainable head's weights start from."""
+
+    head_init_source: HeadInitSource = "served"
+    """`"served"` copies the checkpoint the engine is serving into the trainable head,
+    so a restart continues training it; `"random"` small-inits the head instead and
+    starts from chance."""
+
+    @property
+    def from_served(self) -> bool:
+        """Whether the served checkpoint is adopted."""
+        return self.head_init_source == "served"
+
+
+@config(frozen=True)
 class PublishSettings:
     """Whether trained weights reach the live drafter without a restart."""
 
@@ -308,6 +324,7 @@ class OnlineTrainSettings:
     """
 
     enabled: bool = False
+    head_init: HeadInitSettings = field(default_factory=HeadInitSettings)
     objective: ObjectiveSettings = field(default_factory=ObjectiveSettings)
     optim: OptimSettings = field(default_factory=OptimSettings)
     anchors: AnchorSettings = field(default_factory=AnchorSettings)

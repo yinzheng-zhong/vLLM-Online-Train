@@ -7,6 +7,7 @@ from vllm_online_train.config.settings import (
     BufferSettings,
     CaptureSettings,
     GateSettings,
+    HeadInitSettings,
     ObjectiveSettings,
     OnlineTrainSettings,
     OptimSettings,
@@ -22,6 +23,7 @@ class SettingsFactory:
     """Builds `OnlineTrainSettings` from the flat mapping an operator writes."""
 
     SECTIONS: dict[str, type] = {
+        "head_init": HeadInitSettings,
         "objective": ObjectiveSettings,
         "optim": OptimSettings,
         "anchors": AnchorSettings,

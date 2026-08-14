@@ -20,6 +20,12 @@ class WeightNameRewriter:
     """Tensors the serving path binds from the target when the checkpoint omits
     them."""
 
+    SPLIT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("qkv_proj", ("q_proj", "k_proj", "v_proj")),
+        ("gate_up_proj", ("gate_proj", "up_proj")),
+    )
+    """Fused projection name to the split names it concatenates, in that order."""
+
     def rewrite(
         self,
         named_tensors: Iterable[tuple[str, torch.Tensor]],
@@ -50,6 +56,82 @@ class WeightNameRewriter:
                 yield from self._split_gate_up(name, tensor, head_arch)
             else:
                 yield name, tensor
+
+    def fuse(
+        self, named_tensors: Iterable[tuple[str, torch.Tensor]]
+    ) -> Iterator[tuple[str, torch.Tensor]]:
+        """Concatenate the split projections back into the head's fused naming.
+
+        The inverse of `rewrite`, minus the tensors it drops: a checkpoint carries no
+        `embed_tokens` or `lm_head`, so nothing here re-adds them.
+
+        Args:
+            named_tensors: On-disk pairs, i.e. what `rewrite` produced.
+
+        Yields:
+            One `(name, tensor)` pair per fused parameter.
+
+        Raises:
+            ValueError: If a split projection is missing one of its parts, which would
+                otherwise fuse into a tensor of the wrong width.
+        """
+        on_disk = dict(named_tensors)
+        split_names: set[str] = set()
+        fused_tensors: dict[str, torch.Tensor] = {}
+
+        for name in sorted(on_disk):
+            split_group = self._split_group(name)
+            if split_group is None:
+                continue
+            name_stem, fused_suffix, split_suffixes, param_suffix = split_group
+            part_names = [
+                f"{name_stem}.{split_suffix}.{param_suffix}"
+                for split_suffix in split_suffixes
+            ]
+            absent_names = [part for part in part_names if part not in on_disk]
+            if absent_names:
+                raise ValueError(
+                    f"checkpoint holds {name} but not {', '.join(absent_names)}. "
+                    f"{fused_suffix} concatenates {', '.join(split_suffixes)} and "
+                    "cannot be fused from part of itself."
+                )
+            split_names.update(part_names)
+            fused_name = f"{name_stem}.{fused_suffix}.{param_suffix}"
+            if fused_name not in fused_tensors:
+                fused_tensors[fused_name] = torch.cat(
+                    [on_disk[part] for part in part_names], dim=0
+                )
+
+        logger.debug(
+            "Fused %d on-disk tensors into %d parameters",
+            len(split_names),
+            len(fused_tensors),
+        )
+        for name, tensor in on_disk.items():
+            if name not in split_names:
+                yield name, tensor
+        yield from fused_tensors.items()
+
+    @classmethod
+    def _split_group(
+        cls, name: str
+    ) -> tuple[str, str, tuple[str, ...], str] | None:
+        """The fused group an on-disk parameter name belongs to.
+
+        Args:
+            name: An on-disk parameter name.
+
+        Returns:
+            `(name_stem, fused_suffix, split_suffixes, param_suffix)`, or `None` when
+            the name is not one part of a split projection.
+        """
+        if name.count(".") < 2:
+            return None
+        name_stem, projection_name, param_suffix = name.rsplit(".", 2)
+        for fused_suffix, split_suffixes in cls.SPLIT_GROUPS:
+            if projection_name in split_suffixes:
+                return name_stem, fused_suffix, split_suffixes, param_suffix
+        return None
 
     @staticmethod
     def _split_qkv(

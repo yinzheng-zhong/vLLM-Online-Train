@@ -1,5 +1,5 @@
 import math
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 import torch
 from torch import nn
@@ -101,6 +101,69 @@ class HeadWeights:
                 elif isinstance(module, RMSNorm):
                     module.weight.fill_(1.0)
         self.freeze_shared(draft_head)
+
+    def load_trained(
+        self,
+        draft_head: TrainableDFlashHead,
+        named_tensors: Iterable[tuple[str, torch.Tensor]],
+    ) -> int:
+        """Copy trained tensors into a head in place, and re-freeze the borrowed ones.
+
+        The inverse of `export`: names arrive in fused form without the `model.` prefix
+        `state_dict()` carries. Copying in place keeps each parameter's device and
+        dtype, so a checkpoint held at the serving precision loads into an fp32 head.
+        Tensors the head borrows from the target are skipped rather than overwritten.
+
+        Args:
+            draft_head: The head to load into.
+            named_tensors: Fused-naming pairs, i.e. `WeightNameRewriter.fuse()`.
+
+        Returns:
+            The number of trained tensors copied.
+
+        Raises:
+            ValueError: If a name is not a tensor of this head, a shape disagrees with
+                the head's, or a trainable parameter of this head goes unloaded.
+        """
+        head_tensors = dict(draft_head.state_dict())
+        trained_names = {
+            name
+            for name, parameter in draft_head.named_parameters()
+            if parameter.requires_grad
+        }
+        loaded_names: set[str] = set()
+
+        with torch.no_grad():
+            for name, tensor in named_tensors:
+                head_name = (
+                    name if name.startswith("lm_head") else f"model.{name}"
+                )
+                head_tensor = head_tensors.get(head_name)
+                if head_tensor is None:
+                    raise ValueError(
+                        f"checkpoint holds {name}, which is not a tensor of this head. "
+                        f"Accepted names are {sorted(head_tensors)}."
+                    )
+                if head_name not in trained_names:
+                    continue
+                if head_tensor.shape != tensor.shape:
+                    raise ValueError(
+                        f"checkpoint's {name} is {tuple(tensor.shape)} but this head's "
+                        f"is {tuple(head_tensor.shape)}. The checkpoint was trained "
+                        "for a different shape than the engine is serving."
+                    )
+                head_tensor.copy_(tensor)
+                loaded_names.add(head_name)
+
+        unloaded_names = sorted(trained_names - loaded_names)
+        if unloaded_names:
+            raise ValueError(
+                f"checkpoint supplied no value for {', '.join(unloaded_names)}. "
+                "Loading part of a head leaves the rest small-initialised, which "
+                "trains against a projection the serving path will never apply."
+            )
+        self.freeze_shared(draft_head)
+        return len(loaded_names)
 
     def export(
         self, draft_head: TrainableDFlashHead

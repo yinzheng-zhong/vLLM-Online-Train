@@ -1,6 +1,8 @@
 {
   "_comment": "3-layer DFlash head on Qwen3-4B, 24 GiB card. Serve with --gpu-memory-utilization 0.62.",
 
+  "head_init_source": "served",
+
   "kl_chunk_size": 128,
   "sequences_per_step": 2,
   "anchors_per_sequence": 8,

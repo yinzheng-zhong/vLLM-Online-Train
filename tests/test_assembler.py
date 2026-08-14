@@ -4,16 +4,22 @@ The head holds two vocabulary-sized tensors and every borrow is another one, so 
 pin the precision each is placed at and the number of copies alive at once.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 import torch
 
 from tests.conftest import (
     CPU,
     REMOTE,
     FakeTarget,
+    checkpoint_writer,
     fake_vllm_config,
+    head_factory,
+    head_weights,
+    make_arch,
     make_config,
     make_settings,
     placed,
@@ -54,9 +60,14 @@ class RecordingProvider:
         return self.inner_provider.lm_head_weight(device, dtype)
 
 
+NO_SERVED_HEAD = Path("/nonexistent/head")
+"""A served directory holding no weights, so `build_head` keeps the random head."""
+
+
 def build(
     target_model: FakeTarget | None = None,
     device: torch.device = CPU,
+    source_dir: Path = NO_SERVED_HEAD,
     **settings_overrides: Any,
 ) -> tuple[TrainableDFlashHead, RecordingProvider]:
     """Build a head the way a session does.
@@ -64,6 +75,7 @@ def build(
     Args:
         target_model: The model to borrow from. Defaults to a bf16 `FakeTarget`.
         device: The training device the provider reports.
+        source_dir: The served head's directory.
         **settings_overrides: Flat settings fields.
 
     Returns:
@@ -80,7 +92,7 @@ def build(
         online_train_settings=make_settings(**settings_overrides)
     )
     draft_head = SessionAssembler().build_head(
-        fake_vllm_config(), resolved_config, state_provider
+        fake_vllm_config(), resolved_config, state_provider, source_dir
     )
     return draft_head, state_provider
 
@@ -129,6 +141,83 @@ def test_the_head_lands_on_the_training_device():
     draft_head, _ = build(device=REMOTE)
     assert draft_head.model.embed_tokens.weight.device == placed(REMOTE)
     assert draft_head.model.fc.weight.device == placed(REMOTE)
+
+
+def write_served_head(directory: Path) -> Any:
+    """Write a trained head into a directory the way an export does.
+
+    Args:
+        directory: Destination.
+
+    Returns:
+        The head that was written.
+    """
+    head_arch = make_arch()
+    served_head = head_factory.create(
+        head_arch, generator=torch.Generator().manual_seed(11)
+    )
+    checkpoint_writer.write(
+        directory,
+        head_weights.export(served_head),
+        head_arch,
+        dtype=torch.bfloat16,
+    )
+    return served_head
+
+
+def test_the_served_checkpoint_is_adopted_by_default(tmp_path):
+    """The bug this closes: serving v1 while training a fresh random head throws away
+    every step of the previous run and restarts top-1 agreement at chance."""
+    served_head = write_served_head(tmp_path)
+    draft_head, _ = build(source_dir=tmp_path)
+
+    torch.testing.assert_close(
+        draft_head.model.fc.weight,
+        served_head.model.fc.weight,
+        atol=1e-2,
+        rtol=1e-2,
+    )
+    torch.testing.assert_close(
+        draft_head.model.layers[0].self_attn.qkv_proj.weight,
+        served_head.model.layers[0].self_attn.qkv_proj.weight,
+        atol=1e-2,
+        rtol=1e-2,
+    )
+    assert draft_head.model.fc.weight.dtype == torch.float32
+    assert draft_head.model.fc.weight.requires_grad
+
+
+def test_a_random_head_is_available_on_request(tmp_path):
+    """The from-scratch baseline the README's A/B needs."""
+    served_head = write_served_head(tmp_path)
+    draft_head, _ = build(source_dir=tmp_path, head_init_source="random")
+
+    assert not torch.allclose(
+        draft_head.model.fc.weight,
+        served_head.model.fc.weight.to(torch.float32),
+        atol=1e-2,
+    )
+
+
+def test_a_served_directory_with_no_weights_leaves_the_head_random(tmp_path):
+    """A draft served from a format this reader cannot open must not take the engine
+    down; serving is unaffected by what the trainer starts from."""
+    draft_head, _ = build(source_dir=tmp_path)
+    assert draft_head.model.fc.weight.requires_grad
+
+
+def test_a_served_checkpoint_of_another_shape_is_refused(tmp_path):
+    """Loading it would train against a projection the serving path never applies, and
+    the sag in acceptance is indistinguishable from a badly-trained head."""
+    wide_arch = make_arch(hidden_size=64)
+    checkpoint_writer.write(
+        tmp_path,
+        head_weights.export(head_factory.create(wide_arch)),
+        wide_arch,
+        dtype=torch.bfloat16,
+    )
+    with pytest.raises(ValueError, match="different shape"):
+        build(source_dir=tmp_path)
 
 
 class StubRunner:
