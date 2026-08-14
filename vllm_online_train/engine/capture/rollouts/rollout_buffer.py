@@ -29,8 +29,11 @@ class RolloutBuffer:
         concatenated into a `RolloutRecord` and admitted to the pool when they finish.
 
         This is the boundary between the two threads. The engine thread is the only
-        writer; the trainer thread only reads, and an admitted record is immutable, so
-        a draw needs no lock -- only a pool that cannot be resized underneath it.
+        writer of the pool and of every admitted record's tensors, and the trainer
+        thread writes only each record's `draws` counter, so a draw needs no lock --
+        only a pool that cannot be resized underneath it. A record that reaches
+        `max_draws_per_rollout` stops being drawn immediately and is dropped from the
+        pool by the engine thread on the next admission.
 
         Args:
             buffer_settings: Capacity and the length bounds.
@@ -61,13 +64,18 @@ class RolloutBuffer:
         """Requests still accumulating."""
         return len(self._pending_rollouts)
 
+    @property
+    def num_eligible(self) -> int:
+        """Pooled rollouts still under the draw cap."""
+        return len(self.pooled_rollout_sampler.eligible(self._pooled_rollouts))
+
     def can_sample(self, count: int) -> bool:
-        """Whether the pool holds at least `count` rollouts.
+        """Whether the pool holds at least `count` rollouts still under the draw cap.
 
         Args:
             count: Rollouts a training batch needs.
         """
-        return len(self._pooled_rollouts) >= count
+        return self.num_eligible >= count
 
     def begin(self, req_id: str, prompt_len: int) -> None:
         """Register a request. Idempotent across a chunked prefill.
@@ -187,14 +195,32 @@ class RolloutBuffer:
         return rollout_record
 
     def _admit(self, rollout_record: RolloutRecord) -> None:
-        """Add a record to the pool, evicting the oldest until capacity holds."""
+        """Add a record to the pool, retiring spent records and evicting the oldest
+        until capacity holds."""
         self._pooled_rollouts.append(rollout_record)
         self._pooled_tokens += rollout_record.num_tokens
         self.buffer_stats.admitted += 1
+        self._retire_spent()
         while self._pooled_tokens > self.buffer_settings.buffer_capacity_tokens:
             evicted_record = self._pooled_rollouts.pop(0)
             self._pooled_tokens -= evicted_record.num_tokens
             self.buffer_stats.evicted += 1
+
+    def _retire_spent(self) -> None:
+        """Drop the records that have reached the draw cap, freeing their tensors.
+
+        The pool is rebound rather than mutated in place, so a draw that read the old
+        list still sees a complete pool. `list.remove` is unusable here: the record's
+        generated `__eq__` compares tensors and raises on the first non-identical
+        element it reaches.
+        """
+        pooled_rollouts = self._pooled_rollouts
+        kept_records = self.pooled_rollout_sampler.eligible(pooled_rollouts)
+        if len(kept_records) == len(pooled_rollouts):
+            return
+        self._pooled_rollouts = kept_records
+        self._pooled_tokens = sum(record.num_tokens for record in kept_records)
+        self.buffer_stats.retired += len(pooled_rollouts) - len(kept_records)
 
     def sample(self, count: int) -> list[RolloutRecord]:
         """Draw a training batch without removing it from the pool.
@@ -218,12 +244,21 @@ class RolloutBuffer:
         self._pooled_tokens = 0
 
     def as_metrics(self) -> dict[str, float]:
-        """Counters plus the current fill, under a `buffer/` prefix."""
+        """Counters plus the current fill and reuse, under a `buffer/` prefix."""
+        pooled_rollouts = self._pooled_rollouts
         metrics = self.buffer_stats.as_metrics()
-        metrics["buffer/rollouts"] = float(len(self._pooled_rollouts))
+        metrics["buffer/rollouts"] = float(len(pooled_rollouts))
         metrics["buffer/tokens"] = float(self._pooled_tokens)
         metrics["buffer/pending"] = float(len(self._pending_rollouts))
         metrics["buffer/fill"] = float(
             self._pooled_tokens / self.buffer_settings.buffer_capacity_tokens
+        )
+        metrics["buffer/eligible"] = float(
+            len(self.pooled_rollout_sampler.eligible(pooled_rollouts))
+        )
+        metrics["buffer/mean_draws"] = float(
+            sum(record.draws for record in pooled_rollouts) / len(pooled_rollouts)
+            if pooled_rollouts
+            else 0.0
         )
         return metrics

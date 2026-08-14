@@ -166,6 +166,38 @@ def test_step_from_buffer_trains_once_the_pool_fills(
     assert rollout_buffer.num_rollouts == len(rollout_records)
 
 
+def test_step_from_buffer_stops_once_the_draw_cap_is_reached(
+    draft_head, sft_objective, rollout_records
+):
+    """Without traffic the pool is finite, so training has to stop rather than replay
+    the same rollouts indefinitely."""
+    resolved_config = make_config(
+        make_settings(sequences_per_step=2, max_draws_per_rollout=2)
+    )
+    online_trainer = make_trainer(resolved_config, draft_head, sft_objective)
+    rollout_buffer = make_buffer(resolved_config)
+    for index, rollout_record in enumerate(rollout_records):
+        rollout_buffer.begin(f"r{index}", prompt_len=rollout_record.prompt_len)
+        rollout_buffer.add_chunk(
+            f"r{index}",
+            token_ids=rollout_record.token_ids,
+            features=rollout_record.features,
+            final_hidden=rollout_record.final_hidden,
+        )
+        rollout_buffer.seal(f"r{index}")
+
+    # Two draws per rollout, two rollouts per step: the pool supports exactly as many
+    # steps as it holds rollouts.
+    steps_trained = 0
+    while online_trainer.step_from_buffer(rollout_buffer) is not None:
+        steps_trained += 1
+        assert steps_trained <= len(rollout_records), "the draw cap retired nothing"
+
+    assert steps_trained == len(rollout_records)
+    assert rollout_buffer.num_eligible == 0
+    assert rollout_buffer.num_rollouts == len(rollout_records)
+
+
 def test_open_ended_runs_warm_up_then_hold(
     draft_head, sft_objective, replay_batch
 ):

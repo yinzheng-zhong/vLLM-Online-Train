@@ -18,28 +18,52 @@ class PooledRolloutSampler:
         self.buffer_settings = buffer_settings
         self.rng = rng
 
+    def eligible(self, pooled_rollouts: list[RolloutRecord]) -> list[RolloutRecord]:
+        """The pooled rollouts still under the draw cap, oldest first.
+
+        Args:
+            pooled_rollouts: The admitted rollouts, oldest first.
+
+        Returns:
+            Every record when the cap is 0, otherwise those drawn fewer than
+            `max_draws_per_rollout` times.
+        """
+        max_draws = self.buffer_settings.max_draws_per_rollout
+        if not max_draws:
+            return pooled_rollouts
+        return [record for record in pooled_rollouts if record.draws < max_draws]
+
     def draw(
         self, pooled_rollouts: list[RolloutRecord], count: int
     ) -> list[RolloutRecord]:
-        """Take `count` rollouts, or the whole pool when it is smaller.
+        """Take `count` eligible rollouts, or all of them when there are fewer.
+
+        Every drawn record has its `draws` counter incremented, which is what retires it
+        once it reaches `max_draws_per_rollout`.
 
         Args:
             pooled_rollouts: The admitted rollouts, oldest first.
             count: How many to draw.
 
         Returns:
-            The drawn rollouts. Empty when the pool is.
+            The drawn rollouts. Empty when nothing is eligible.
         """
-        if not pooled_rollouts:
+        eligible_rollouts = self.eligible(pooled_rollouts)
+        if not eligible_rollouts:
             return []
-        count = min(count, len(pooled_rollouts))
+        count = min(count, len(eligible_rollouts))
         sample_strategy = self.buffer_settings.sample_strategy
         logger.debug(
-            "drew %d/%d rollouts via %s",
+            "drew %d/%d eligible rollouts (%d pooled) via %s",
             count,
+            len(eligible_rollouts),
             len(pooled_rollouts),
             sample_strategy,
         )
         if sample_strategy == "fifo":
-            return pooled_rollouts[:count]
-        return self.rng.sample(pooled_rollouts, count)
+            drawn_records = eligible_rollouts[:count]
+        else:
+            drawn_records = self.rng.sample(eligible_rollouts, count)
+        for record in drawn_records:
+            record.draws += 1
+        return drawn_records

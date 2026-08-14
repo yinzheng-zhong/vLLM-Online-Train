@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 from vllm_online_train.config.settings import CaptureSettings
 from vllm_online_train.engine.capture.feature_stager import FeatureStager
 from vllm_online_train.engine.capture.request_sampler import RequestSampler
-from vllm_online_train.engine.capture.valid_positions import ValidPositions
 from vllm_online_train.engine.capture.rollouts.rollout_buffer import RolloutBuffer
+from vllm_online_train.engine.capture.valid_positions import ValidPositions
 from vllm_online_train.logger import init_logger
 from vllm_online_train.step import EngineStep
 

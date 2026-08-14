@@ -158,6 +158,81 @@ def test_sampling_does_not_consume():
     assert len(rollout_buffer.sample(2)) == 2
 
 
+def test_spent_rollouts_stop_being_sampled_at_once():
+    """`can_sample` has to agree with what `sample` can actually serve: counting pooled
+    rollouts rather than eligible ones would greenlight a step that draws nothing, and
+    the trainer would spin instead of backing off."""
+    resolved_config = make_config(make_settings(max_draws_per_rollout=2))
+    rollout_buffer = make_buffer(resolved_config)
+    for index in range(2):
+        req_id = f"r{index}"
+        rollout_buffer.begin(req_id, prompt_len=2)
+        rollout_buffer.add_chunk(req_id, **make_chunk(40))
+        rollout_buffer.seal(req_id)
+
+    assert rollout_buffer.num_eligible == 2
+    assert len(rollout_buffer.sample(2)) == 2
+    assert len(rollout_buffer.sample(2)) == 2
+
+    assert rollout_buffer.num_eligible == 0
+    assert not rollout_buffer.can_sample(1)
+    assert rollout_buffer.sample(2) == []
+
+
+def test_spent_rollouts_are_dropped_on_the_next_admission():
+    """The engine thread frees them, not the trainer: a draw removing records would make
+    the pool a two-writer structure and `_pooled_tokens` would lose updates."""
+    resolved_config = make_config(make_settings(max_draws_per_rollout=1))
+    rollout_buffer = make_buffer(resolved_config)
+    rollout_buffer.begin("a", prompt_len=2)
+    rollout_buffer.add_chunk("a", **make_chunk(40))
+    rollout_buffer.seal("a")
+    rollout_buffer.sample(1)
+
+    # Spent, but nothing has been admitted since, so it still holds its tensors.
+    assert rollout_buffer.num_rollouts == 1
+    assert rollout_buffer.num_tokens == 40
+
+    rollout_buffer.begin("b", prompt_len=2)
+    rollout_buffer.add_chunk("b", **make_chunk(30))
+    rollout_buffer.seal("b")
+
+    # The token count is the fill the survivors actually account for, not a running
+    # subtraction that could drift.
+    assert rollout_buffer.num_rollouts == 1
+    assert rollout_buffer.num_tokens == 30
+    assert rollout_buffer.buffer_stats.retired == 1
+    assert rollout_buffer.buffer_stats.evicted == 0
+
+
+def test_an_uncapped_pool_never_retires():
+    rollout_buffer = make_buffer(make_config(make_settings(max_draws_per_rollout=0)))
+    for index in range(3):
+        req_id = f"r{index}"
+        rollout_buffer.begin(req_id, prompt_len=2)
+        rollout_buffer.add_chunk(req_id, **make_chunk(40))
+        rollout_buffer.seal(req_id)
+        rollout_buffer.sample(1)
+
+    assert rollout_buffer.num_rollouts == 3
+    assert rollout_buffer.buffer_stats.retired == 0
+
+
+def test_metrics_report_reuse():
+    resolved_config = make_config(make_settings(max_draws_per_rollout=2))
+    rollout_buffer = make_buffer(resolved_config)
+    for index in range(2):
+        req_id = f"r{index}"
+        rollout_buffer.begin(req_id, prompt_len=2)
+        rollout_buffer.add_chunk(req_id, **make_chunk(40))
+        rollout_buffer.seal(req_id)
+    rollout_buffer.sample(2)
+
+    metrics = rollout_buffer.as_metrics()
+    assert metrics["buffer/eligible"] == 2.0
+    assert metrics["buffer/mean_draws"] == 1.0
+
+
 def test_sampling_draws_from_a_snapshot_of_the_pool():
     """The trainer thread draws while the engine thread admits and evicts. Handing the
     live list out lets an eviction land between the sampler's length read and its
@@ -167,6 +242,9 @@ def test_sampling_draws_from_a_snapshot_of_the_pool():
 
     class Evicting:
         """Stands in for an eviction landing inside the draw."""
+
+        def eligible(self, pooled_rollouts):
+            return pooled_rollouts
 
         def draw(self, pooled_rollouts, count):
             pooled_rollouts.clear()

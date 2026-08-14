@@ -66,6 +66,10 @@ class RolloutRecord:
     prompt_len: int
     """Tokens belonging to the prompt. Anchors start at `prompt_len - 1`."""
 
+    draws: int = 0
+    """Training batches this record has been drawn into. The trainer thread is the only
+    reader and the only writer; the engine thread never touches it."""
+
     @property
     def num_tokens(self) -> int:
         """Positions the record covers."""
@@ -92,6 +96,7 @@ class BufferStats:
 
     admitted: int = 0
     evicted: int = 0
+    retired: int = 0
     dropped_too_short: int = 0
     dropped_too_long: int = 0
     dropped_prefix_cache_hit: int = 0

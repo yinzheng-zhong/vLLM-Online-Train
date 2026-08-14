@@ -144,13 +144,22 @@ class BufferSettings:
     sample_strategy: SampleStrategy = "reservoir"
     """`"reservoir"` draws uniformly over the pool; `"fifo"` takes the oldest."""
 
+    max_draws_per_rollout: int = 0
+    """Training batches a single rollout may appear in before it stops being drawn;
+    0 draws it for as long as it stays pooled."""
+
     def __post_init__(self) -> None:
         """Reject capacities that cannot hold what they admit.
 
         Raises:
-            ValueError: If the length bounds are inverted or the pool cannot hold one
-                maximum-length rollout.
+            ValueError: If the length bounds are inverted, the pool cannot hold one
+                maximum-length rollout, or the draw cap is negative.
         """
+        if self.max_draws_per_rollout < 0:
+            raise ValueError(
+                f"max_draws_per_rollout must be >= 0, got "
+                f"{self.max_draws_per_rollout}"
+            )
         if self.min_rollout_tokens > self.max_rollout_tokens:
             raise ValueError(
                 f"min_rollout_tokens ({self.min_rollout_tokens}) exceeds "

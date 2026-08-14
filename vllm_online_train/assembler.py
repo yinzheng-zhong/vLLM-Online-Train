@@ -12,12 +12,12 @@ from vllm_online_train.contracts.provider import StateProvider
 from vllm_online_train.engine.capture.feature_stager import FeatureStager
 from vllm_online_train.engine.capture.request_sampler import RequestSampler
 from vllm_online_train.engine.capture.rollout_capture import RolloutCapture
-from vllm_online_train.engine.capture.valid_positions import ValidPositions
 from vllm_online_train.engine.capture.rollouts.pooled_rollout_sampler import (
     PooledRolloutSampler,
 )
 from vllm_online_train.engine.capture.rollouts.rollout_buffer import RolloutBuffer
 from vllm_online_train.engine.capture.rollouts.rollout_records import BufferStats
+from vllm_online_train.engine.capture.valid_positions import ValidPositions
 from vllm_online_train.engine.state.engine import EngineStateProvider
 from vllm_online_train.engine.state.mirrored import MirroredStateProvider
 from vllm_online_train.engine.state.target_locator import TargetLocator
