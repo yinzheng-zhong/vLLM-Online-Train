@@ -179,7 +179,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     generator = torch.Generator().manual_seed(parsed_args.seed)
-    draft_head = head_factory.create(head_arch, generator=generator)
+    draft_head = head_factory.create(
+        head_arch, generator=generator, borrowed_weight_device="meta"
+    )
 
     logger.debug(
         "writing checkpoint to %s at dtype=%s", out_dir, parsed_args.dtype

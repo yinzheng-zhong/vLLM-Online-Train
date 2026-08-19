@@ -85,6 +85,35 @@ def test_shared_tensors_are_not_written(head_arch):
         )
 
 
+def test_a_meta_borrowed_head_writes_the_same_checkpoint(head_arch, tmp_path):
+    """Since the borrowed tensors are dropped before the write, a head that never
+    allocated them has to produce the checkpoint a fully materialised one does."""
+    materialised_head = head_factory.create(
+        head_arch, generator=torch.Generator().manual_seed(0)
+    )
+    meta_head = head_factory.create(
+        head_arch,
+        generator=torch.Generator().manual_seed(0),
+        borrowed_weight_device="meta",
+    )
+    assert meta_head.model.embed_tokens.weight.device.type == "meta"
+    assert meta_head.lm_head.weight.device.type == "meta"
+
+    written_paths = [
+        checkpoint_writer.write(
+            tmp_path / name,
+            head_weights.export(draft_head),
+            head_arch,
+            dtype=torch.bfloat16,
+        )
+        for name, draft_head in (
+            ("materialised", materialised_head),
+            ("meta", meta_head),
+        )
+    ]
+    assert written_paths[0].read_bytes() == written_paths[1].read_bytes()
+
+
 def test_fused_projections_split_by_value(head_arch):
     """Splitting must preserve values, not just produce plausible names.
 

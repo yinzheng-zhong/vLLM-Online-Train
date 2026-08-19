@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 from vllm_online_train.training.head.arch import DFlashHeadArch
@@ -6,16 +7,26 @@ from vllm_online_train.training.head.layers.norm import RMSNorm
 
 
 class DFlashModel(nn.Module):
-    def __init__(self, head_arch: DFlashHeadArch) -> None:
+    def __init__(
+        self,
+        head_arch: DFlashHeadArch,
+        *,
+        borrowed_weight_device: torch.device | str | None = None,
+    ) -> None:
         """Mirrors `DFlashQwen3Model`, so `state_dict()` keys line up under `model.`.
 
         Args:
             head_arch: Supplies the layer count and every width.
+            borrowed_weight_device: Device holding `embed_tokens`, the table bound from
+                the target. `None` uses the default device; `"meta"` gives the table a
+                shape but no storage.
         """
         super().__init__()
         self.head_arch = head_arch
         self.embed_tokens = nn.Embedding(
-            head_arch.vocab_size, head_arch.hidden_size
+            head_arch.vocab_size,
+            head_arch.hidden_size,
+            device=borrowed_weight_device,
         )
         self.layers = nn.ModuleList(
             [DFlashLayer(head_arch) for _ in range(head_arch.num_layers)]

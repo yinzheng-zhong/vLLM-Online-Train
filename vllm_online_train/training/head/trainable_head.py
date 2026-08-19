@@ -9,7 +9,11 @@ from vllm_online_train.training.head.model import DFlashModel
 
 class TrainableDFlashHead(nn.Module):
     def __init__(
-        self, head_arch: DFlashHeadArch, block_mask_builder: BlockMaskBuilder
+        self,
+        head_arch: DFlashHeadArch,
+        block_mask_builder: BlockMaskBuilder,
+        *,
+        borrowed_weight_device: torch.device | str | None = None,
     ) -> None:
         """Eager DFlash head with a training-shaped forward.
 
@@ -20,13 +24,22 @@ class TrainableDFlashHead(nn.Module):
         Args:
             head_arch: Shape of the head.
             block_mask_builder: Builds the anchored block mask and its position ids.
+            borrowed_weight_device: Device holding `embed_tokens` and `lm_head`, the two
+                tensors bound from the target. `None` uses the default device; `"meta"`
+                gives them a shape but no storage, which suits a head that will only
+                have its trained tensors read.
         """
         super().__init__()
         self.head_arch = head_arch
         self.block_mask_builder = block_mask_builder
-        self.model = DFlashModel(head_arch)
+        self.model = DFlashModel(
+            head_arch, borrowed_weight_device=borrowed_weight_device
+        )
         self.lm_head = nn.Linear(
-            head_arch.hidden_size, head_arch.draft_vocab_size, bias=False
+            head_arch.hidden_size,
+            head_arch.draft_vocab_size,
+            bias=False,
+            device=borrowed_weight_device,
         )
 
     @property

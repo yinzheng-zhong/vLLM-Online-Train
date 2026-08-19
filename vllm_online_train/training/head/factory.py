@@ -27,17 +27,24 @@ class HeadFactory:
         head_arch: DFlashHeadArch,
         *,
         generator: torch.Generator | None = None,
+        borrowed_weight_device: torch.device | str | None = None,
     ) -> TrainableDFlashHead:
         """Build a head with small-init trained tensors and frozen borrowed ones.
 
         Args:
             head_arch: Shape of the head.
             generator: Draws the initial weights.
+            borrowed_weight_device: Device holding `embed_tokens` and `lm_head`. `None`
+                uses the default device; `"meta"` gives them a shape but no storage.
 
         Returns:
             The head, on the default device at the default dtype.
         """
-        draft_head = TrainableDFlashHead(head_arch, self.block_mask_builder)
+        draft_head = TrainableDFlashHead(
+            head_arch,
+            self.block_mask_builder,
+            borrowed_weight_device=borrowed_weight_device,
+        )
         self.head_weights.init_draft(draft_head, generator=generator)
         logger.debug(
             "Built head: num_layers=%d hidden_size=%d block_size=%d "
